@@ -1,0 +1,50 @@
+name: shorts-factory
+
+on:
+  schedule:
+    # 13:00 & 22:00 UTC = 9:00 AM & 6:00 PM US Eastern (summer).
+    # GitHub may delay these by a few minutes — that's fine, looks natural.
+    - cron: '0 13 * * *'
+    - cron: '0 22 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg + fonts
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg fonts-dejavu-core
+
+      - name: Install Python packages
+        run: pip install -q numpy pillow google-api-python-client google-auth-oauthlib
+
+      - name: Write credentials from secrets
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+        run: |
+          printf '%s' "$CLIENT_SECRET_JSON" > client_secret.json
+          printf '%s' "$TOKEN_JSON" > token.json
+
+      - name: Generate and upload one Short
+        run: python daily_run.py --count 1
+
+      - name: Log the run (keeps scheduled workflows from being auto-disabled)
+        run: |
+          git config user.name "shorts-factory-bot"
+          git config user.email "actions@users.noreply.github.com"
+          date -u +"%Y-%m-%d %H:%M UTC uploaded 1 video" >> upload_log.txt
+          git add upload_log.txt
+          git commit -m "log: scheduled upload"
+          git pull --rebase
+          git push

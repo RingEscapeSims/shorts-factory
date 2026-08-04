@@ -1,0 +1,13 @@
+# never commit credentials
+client_secret.json
+token.json
+token.json.bak
+
+# generated content and local-only stuff
+queue/
+published/
+shorts_factory/
+*.mp4
+escape_*.json
+__pycache__/
+.claude/
