@@ -23,7 +23,13 @@ jobs:
           python-version: '3.12'
 
       - name: Install ffmpeg + fonts
-        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg fonts-dejavu-core
+        timeout-minutes: 5
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get install -y -q --no-install-recommends ffmpeg fonts-dejavu-core \
+              || { sudo apt-get update -q; sudo apt-get install -y -q --no-install-recommends ffmpeg fonts-dejavu-core; }
+          fi
+          ffmpeg -version | head -1
 
       - name: Install Python packages
         run: pip install -q numpy pillow google-api-python-client google-auth-oauthlib
