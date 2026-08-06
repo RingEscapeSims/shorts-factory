@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KIDS STUDIO v2 â€” procedural educational cartoon generator (subscription-free).
+KIDS STUDIO v2 — procedural educational cartoon generator (subscription-free).
 
 Produces original, copyright-clean animated learning videos for children:
   * counting mode : count 1-5 (or 1-10 wide) cute animals, numbers pop on beat
@@ -15,7 +15,7 @@ v2 upgrades ("classic cartoon feel, gentle content"):
     marimba/bell/bass instruments with attack transients, Schroeder reverb,
     slide whistles + boings + thumps synced to motion, soft bird ambience
 
-Everything is generated at runtime from a seed. All audio is synthesized â€”
+Everything is generated at runtime from a seed. All audio is synthesized —
 no samples, no third-party clips. Made-for-Kids metadata is always TRUE.
 
 Usage:
@@ -72,6 +72,41 @@ COLOR_LESSONS = {
     "orange": (246, 140, 44),
 }
 COLOR_ITEMS = ["balloon", "heart", "star", "flower", "fish"]
+
+# Shape lessons: name -> a real-world hook the narrator says in the recap.
+SHAPE_LESSONS = {
+    "circle":    "A circle is round like the sun.",
+    "square":    "A square has four equal sides.",
+    "triangle":  "A triangle has three sides.",
+    "rectangle": "A rectangle is long with four corners.",
+    "star":      "A star has five bright points.",
+    "heart":     "A heart means love.",
+}
+
+# Letter -> gentle, concrete words a preschooler already knows. Kept
+# deliberately plain: no brands, no characters, nothing scary.
+ABC_WORDS = {
+    "A": ["apple", "ant", "arm"],       "B": ["ball", "bear", "bus"],
+    "C": ["cat", "cake", "cow"],        "D": ["dog", "duck", "door"],
+    "E": ["egg", "ear", "elephant"],    "F": ["fish", "frog", "flower"],
+    "G": ["goat", "gift", "grapes"],    "H": ["hat", "hand", "house"],
+    "I": ["ice", "igloo", "insect"],    "J": ["jam", "jug", "jump"],
+    "K": ["kite", "key", "kitten"],     "L": ["leaf", "lion", "lamp"],
+    "M": ["moon", "milk", "mouse"],     "N": ["nest", "nose", "net"],
+    "O": ["orange", "owl", "ocean"],    "P": ["pig", "pear", "pot"],
+    "Q": ["queen", "quilt", "quack"],   "R": ["rain", "rabbit", "ring"],
+    "S": ["sun", "star", "sock"],       "T": ["tree", "train", "tiger"],
+    "U": ["umbrella", "under", "up"],   "V": ["van", "vase", "violin"],
+    "W": ["water", "wind", "wheel"],    "X": ["box", "fox", "six"],
+    "Y": ["yellow", "yarn", "yawn"],    "Z": ["zebra", "zoo", "zip"],
+}
+ABC_SOUNDS = {
+    "A": "ah", "B": "buh", "C": "kuh", "D": "duh", "E": "eh", "F": "ff",
+    "G": "guh", "H": "huh", "I": "ih", "J": "juh", "K": "kuh", "L": "ll",
+    "M": "mm", "N": "nn", "O": "oh", "P": "puh", "Q": "kwuh", "R": "rr",
+    "S": "sss", "T": "tuh", "U": "uh", "V": "vv", "W": "wuh",
+    "X": "ks", "Y": "yuh", "Z": "zz",
+}
 
 
 # ---------------------------------------------------------------- helpers --
@@ -160,7 +195,7 @@ class Voice:
         self.backend = self._pick_backend()
         print(f"voice backend: {self.backend}"
               + ("" if self.backend != "espeak" else
-                 "  (robotic fallback â€” run --setup-voice for a natural one)"))
+                 "  (robotic fallback — run --setup-voice for a natural one)"))
 
     def _pick_backend(self):
         if self.model.exists() and (
@@ -267,7 +302,7 @@ def setup_voice():
         urllib.request.urlretrieve(PIPER_BASE + "MODEL_CARD", card)
     print("Voice installed. Also run:  pip install piper-tts\n"
           "License: the LJSpeech dataset is public domain (see the MODEL_CARD "
-          "in voices/) â€” commercial use OK.")
+          "in voices/) — commercial use OK.")
 
 
 # ------------------------------------------------- audio: instruments/DSP --
@@ -570,7 +605,7 @@ def lay_music(mix: Mixer, dur, root, rng, count_hits):
 
 
 def lay_ambience(mix: Mixer, dur, rng):
-    """Soft breeze + occasional distant birds â€” sells 'real outdoors'."""
+    """Soft breeze + occasional distant birds — sells 'real outdoors'."""
     n = int(dur * SR)
     breeze = _lp(np.random.default_rng(rng.randrange(9999))
                  .standard_normal(n).astype(np.float32), 220)
@@ -628,7 +663,7 @@ def draw_actor(dr, kind, cx, ground_y, s, cols, t, pose):
     # inside their parent fill, so we pre-blend and draw them opaque
     # (which is how cel shading works anyway: a hard-edged shade shape).
     def SHADE(x, y, rx, ry, amt):
-        """Form shadow (no outline) â€” sells volume."""
+        """Form shadow (no outline) — sells volume."""
         col = _mix(body, ink, amt)
         a, b = P(x - rx, y - ry)
         c, d = P(x + rx, y + ry)
@@ -812,6 +847,109 @@ def draw_item(dr, kind, cx, ground_y, s, squash, col, t):
         E(0.05, -1.42, 0.22, 0.12, lite, line=False)
         E(-0.30, -1.26, 0.10, 0.10, (255, 255, 255))
         E(-0.30, -1.26, 0.05, 0.05, (30, 30, 30), line=False)
+
+
+def draw_shape(dr, kind, cx, ground_y, s, squash, col, t):
+    """A single geometric shape, cel-shaded, standing on the ground.
+
+    Used by shapes mode, where the SHAPE is the constant lesson and the
+    colour varies per item (colors mode is the mirror image of this).
+    """
+    # Shapes are wider than the animals at the same nominal size, so trim
+    # them or a row of five squares collides.
+    s = s * 0.86
+    sx = s * (1 + (1 - squash) * 0.4)
+    sy = s * squash
+    ink = tuple(int(c * 0.38) for c in col)
+    lite = tuple(min(255, int(c * 1.22 + 30)) for c in col)
+    lw = max(2, int(s * 0.05))
+
+    def P(x, y):
+        return (cx + x * sx, ground_y + y * sy)
+
+    def E(x, y, rx, ry, fill, line=True):
+        a, b = P(x - rx, y - ry)
+        c, d = P(x + rx, y + ry)
+        dr.ellipse([a, b, c, d], fill=fill,
+                   outline=ink if line else None, width=lw if line else 0)
+
+    def POLY(pts, fill, line=True):
+        dr.polygon([P(x, y) for x, y in pts], fill=fill,
+                   outline=ink if line else None, width=lw if line else 0)
+
+    def SHADE(x, y, rx, ry, amt):
+        a, b = P(x - rx, y - ry)
+        c, d = P(x + rx, y + ry)
+        dr.ellipse([a, b, c, d], fill=_mix(col, ink, amt))
+
+    cy = -1.02                                   # shape centre above feet
+    if kind == "circle":
+        E(0, cy, 0.86, 0.86, col)
+        SHADE(0.22, cy + 0.16, 0.60, 0.60, 0.15)
+        E(-0.30, cy - 0.34, 0.20, 0.14, lite, line=False)
+    elif kind == "square":
+        POLY([(-0.78, cy - 0.78), (0.78, cy - 0.78),
+              (0.78, cy + 0.78), (-0.78, cy + 0.78)], col)
+        POLY([(0.10, cy + 0.10), (0.72, cy + 0.10),
+              (0.72, cy + 0.72), (0.10, cy + 0.72)], _mix(col, ink, 0.15),
+             line=False)
+        E(-0.42, cy - 0.44, 0.16, 0.11, lite, line=False)
+    elif kind == "triangle":
+        POLY([(0, cy - 0.92), (0.92, cy + 0.72), (-0.92, cy + 0.72)], col)
+        POLY([(0.16, cy - 0.52), (0.74, cy + 0.62), (-0.10, cy + 0.62)],
+             _mix(col, ink, 0.14), line=False)
+        E(-0.26, cy + 0.20, 0.13, 0.10, lite, line=False)
+    elif kind == "rectangle":
+        POLY([(-1.00, cy - 0.58), (1.00, cy - 0.58),
+              (1.00, cy + 0.58), (-1.00, cy + 0.58)], col)
+        POLY([(0.14, cy + 0.02), (0.92, cy + 0.02),
+              (0.92, cy + 0.50), (0.14, cy + 0.50)], _mix(col, ink, 0.15),
+             line=False)
+        E(-0.58, cy - 0.30, 0.18, 0.10, lite, line=False)
+    elif kind == "star":
+        pts = []
+        for i in range(10):
+            r = 0.94 if i % 2 == 0 else 0.40
+            a = -math.pi / 2 + i * math.pi / 5
+            pts.append((math.cos(a) * r, cy + math.sin(a) * r))
+        POLY(pts, col)
+        E(-0.20, cy - 0.22, 0.13, 0.11, lite, line=False)
+    elif kind == "heart":
+        E(-0.38, cy - 0.26, 0.44, 0.44, col)
+        E(0.38, cy - 0.26, 0.44, 0.44, col)
+        POLY([(-0.79, cy - 0.14), (0.79, cy - 0.14), (0, cy + 0.86)], col)
+        E(-0.38, cy - 0.26, 0.40, 0.40, col, line=False)
+        E(0.38, cy - 0.26, 0.40, 0.40, col, line=False)
+        SHADE(0.26, cy + 0.10, 0.40, 0.40, 0.13)
+        E(-0.40, cy - 0.36, 0.14, 0.11, lite, line=False)
+
+
+def draw_big_letter(overlay, letter, cx, cy, size, col, rot_deg=0.0):
+    """The alphabet letter itself, as a thick sticker with an ink edge."""
+    if size < 8:
+        return
+    f = font(size)
+    ink = tuple(int(c * 0.40) for c in col)
+    pad = size // 2
+    tmp = Image.new("RGBA", (int(size * 1.5) + pad * 2,
+                             int(size * 1.6) + pad * 2), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tmp)
+    tw = td.textlength(letter, font=f)
+    tx, ty = (tmp.width - tw) / 2, pad * 0.6
+    o = max(3, size // 14)
+    for dx in range(-o, o + 1):
+        for dy in range(-o, o + 1):
+            if dx * dx + dy * dy <= o * o:
+                td.text((tx + dx, ty + dy), letter, font=f, fill=ink)
+    td.text((tx, ty), letter, font=f, fill=col)
+    hi = max(2, size // 26)
+    td.text((tx - hi, ty - hi), letter, font=f,
+            fill=tuple(min(255, int(c * 1.25 + 35)) for c in col))
+    td.text((tx, ty), letter, font=f, fill=col)
+    if rot_deg:
+        tmp = tmp.rotate(rot_deg, expand=True, resample=Image.BICUBIC)
+    overlay.paste(tmp, (int(cx - tmp.width / 2), int(cy - tmp.height / 2)),
+                  tmp)
 
 
 # ---------------------------------------------------------------- scenery --
@@ -1048,6 +1186,107 @@ def jump_state(t_jump, s, t):
     return (0.0, 0.0, 0.74 + 0.26 * ease_out_back(p))
 
 
+def build_shapes(seed, wide):
+    """Shape of the day: five of the same shape in different colours."""
+    rng = random.Random(seed)
+    sname = rng.choice(list(SHAPE_LESSONS))
+    hint = SHAPE_LESSONS[sname]
+    N = 5
+    cols = list(COLOR_LESSONS)
+    rng.shuffle(cols)
+    cols = cols[:N]
+    scenes = [Scene(f"Today we learn the {sname}! Can you say {sname}?",
+                    3.4, "intro")]
+    for i, cname in enumerate(cols, 1):
+        scenes.append(Scene(f"A {cname} {sname}!", 2.4, "count", i))
+    scenes.append(Scene(f"So many {sname}s! {hint} "
+                        f"Can you find a {sname} near you?", 5.0, "recap"))
+    scenes.append(Scene("Wonderful looking, friends! See you next time!",
+                        3.2, "outro"))
+    return dict(scenes=scenes, sname=sname, N=N,
+                item_colors=[COLOR_LESSONS[c] for c in cols],
+                title=f"Shape of the Day: {sname.upper()}!",
+                meta_title=(f"Learn Shapes for Kids: The {sname.capitalize()}! "
+                            f"Fun Shapes Video for Toddlers"),
+                lesson="shapes", theme=COLOR_LESSONS[cols[0]])
+
+
+def build_abc(seed, wide):
+    """Letter of the day: the letter, its sound, and three friendly words."""
+    rng = random.Random(seed)
+    letter = rng.choice(list(ABC_WORDS))
+    words = ABC_WORDS[letter][:]
+    rng.shuffle(words)
+    words = words[:3]
+    N = len(words)
+    low = letter.lower()
+    scenes = [Scene(f"Let's learn the letter {letter}! "
+                    f"{letter} says {ABC_SOUNDS[letter]}.", 3.6, "intro")]
+    for i, w in enumerate(words, 1):
+        scenes.append(Scene(f"{letter} is for {w}!", 2.6, "count", i))
+    scenes.append(Scene(f"Big {letter}, little {low}. "
+                        f"{', '.join(words)}. "
+                        f"What else starts with {letter}?", 5.2, "recap"))
+    scenes.append(Scene("You are learning so well! See you soon, friends!",
+                        3.4, "outro"))
+    return dict(scenes=scenes, letter=letter, words=words, N=N,
+                kind=rng.choice(list(SPECIES)),
+                title=f"The Letter {letter}!",
+                meta_title=(f"Learn the Letter {letter} | ABC Phonics for "
+                            f"Toddlers | Alphabet for Kids"),
+                lesson="the alphabet",
+                theme=hsv255(rng.random(), 0.62, 0.95))
+
+
+# Per-mode tags. Each one is a phrase a parent might genuinely type and
+# that this video genuinely answers. Ten to twelve is the useful ceiling —
+# more reads as stuffing and gets treated as spam.
+MODE_TAGS = {
+    "counting": ["counting for kids", "learn numbers", "numbers 1 to 5",
+                 "count to 10", "preschool math", "toddler learning",
+                 "kids learning videos", "educational video for toddlers",
+                 "learn to count", "nursery learning", "kindergarten"],
+    "colors": ["learn colors", "colors for toddlers", "color song",
+               "learning colours", "preschool colors", "toddler learning",
+               "kids learning videos", "educational video for toddlers",
+               "color names", "nursery learning", "kindergarten"],
+    "shapes": ["learn shapes", "shapes for toddlers", "shapes for kids",
+               "preschool shapes", "circle square triangle",
+               "toddler learning", "kids learning videos",
+               "educational video for toddlers", "shape names",
+               "nursery learning", "kindergarten"],
+    "abc": ["abc for kids", "learn the alphabet", "phonics for toddlers",
+            "letter sounds", "abc song", "alphabet for kids",
+            "toddler learning", "kids learning videos",
+            "educational video for toddlers", "preschool letters",
+            "kindergarten"],
+}
+
+
+def build_description(spec, mode, seed):
+    """Honest description: says what the video teaches and how it was made.
+
+    The 'made with our own engine' line is deliberate. YouTube's inauthentic
+    content policy is about undisclosed mass production; being straight
+    about the process is both truthful and the safer position.
+    """
+    return (
+        f"{spec['meta_title']}\n\n"
+        f"In this video we learn {spec['lesson']} together, slowly and "
+        "calmly, with plenty of time for little ones to join in and answer "
+        "out loud.\n\n"
+        "Everything here is original: the characters are drawn by our own "
+        "animation engine, the music is composed and synthesised for this "
+        "video, and the narration is recorded fresh. No third-party clips, "
+        "no borrowed songs, no copied characters.\n\n"
+        "For parents and teachers: this channel makes gentle, screen-calm "
+        "learning videos for preschoolers — numbers, colours, shapes and "
+        "the alphabet. No loud noises, no flashing, no scary surprises.\n\n"
+        f"Episode #{seed}\n\n"
+        "#kidslearning #toddlers #preschool"
+    )
+
+
 def produce(mode, seed, fmt, outdir):
     wide = fmt == "wide"
     outW, outH = (1920, 1080) if wide else (1080, 1920)
@@ -1056,10 +1295,13 @@ def produce(mode, seed, fmt, outdir):
     k = H / 1080 if wide else W / 1080
 
     rng = random.Random(seed)
-    spec = build_counting(seed, wide) if mode == "counting" \
-        else build_colors(seed, wide)
+    builders = {"counting": build_counting, "colors": build_colors,
+                "shapes": build_shapes, "abc": build_abc}
+    spec = builders[mode](seed, wide)
     scenes = spec["scenes"]
     N = spec["N"]
+    # Which modes put an animal on stage vs. an inanimate prop.
+    actor_mode = mode in ("counting", "abc")
 
     # --- narration first (its real durations define the timeline) ---
     v = Voice()
@@ -1079,7 +1321,7 @@ def produce(mode, seed, fmt, outdir):
 
     # --- layout: characters staged on two depth planes (back row is
     #     smaller, higher and slightly dimmer) so the row reads as a scene,
-    #     not a flat sprite strip. Sizes are deliberately large â€” on a phone
+    #     not a flat sprite strip. Sizes are deliberately large — on a phone
     #     the cast has to dominate the frame. ---
     if wide:
         xs = [W * (0.5 + (i - (N - 1) / 2) * 0.092) for i in range(N)]
@@ -1098,7 +1340,7 @@ def produce(mode, seed, fmt, outdir):
         rows = [ground_y - (H * 0.16 if i < 5 else 0) for i in range(N)]
     # draw far characters first so the front row overlaps them
     draw_order = sorted(range(1, N + 1), key=lambda i: (rows[i - 1], i))
-    if mode == "counting":
+    if actor_mode:
         casts = [actor_colors(spec["kind"], random.Random(seed * 97 + i))
                  for i in range(N)]
 
@@ -1196,6 +1438,26 @@ def produce(mode, seed, fmt, outdir):
     dark_theme = tuple(int(c * 0.45) for c in theme)
     cam_x, cam_z = W / 2, 1.05
 
+    def draw_subject(target, i, x, y, pose, tp):
+        """Draw item i for whichever lesson mode is running.
+
+        One dispatcher used by the main pass and the motion-smear pass, so
+        the ghosts can never drift out of sync with the real drawing.
+        """
+        si = sizes[i - 1]
+        if mode == "counting":
+            draw_actor(target, spec["kind"], x, y, si, casts[i - 1], tp, pose)
+        elif mode == "abc":
+            # the animals present the letter; they are the same species so
+            # the frame reads as one family, with per-item colour variation
+            draw_actor(target, spec["kind"], x, y, si, casts[i - 1], tp, pose)
+        elif mode == "shapes":
+            draw_shape(target, spec["sname"], x, y, si,
+                       pose.get("squash", 1.0), spec["item_colors"][i - 1], tp)
+        else:                                    # colors
+            draw_item(target, spec["items"][i - 1], x, y, si,
+                      pose.get("squash", 1.0), spec["color"], tp)
+
     for f_i in range(n_frames):
         t = f_i / FPS
         im = Image.fromarray(bg.copy())
@@ -1271,15 +1533,8 @@ def produce(mode, seed, fmt, outdir):
                         gx, gh = xs[i - 1], js[0]
                     else:
                         continue
-                    if mode == "counting":
-                        draw_actor(gdr, spec["kind"], gx,
-                                   rows[i - 1] - gh, sizes[i - 1],
-                                   casts[i - 1], tp,
-                                   dict(squash=st["squash"]))
-                    else:
-                        draw_item(gdr, spec["items"][i - 1], gx,
-                                  rows[i - 1] - gh, sizes[i - 1],
-                                  st["squash"], spec["color"], tp)
+                    draw_subject(gdr, i, gx, rows[i - 1] - gh,
+                                 dict(squash=st["squash"]), tp)
             gl.putalpha(gl.getchannel("A").point(lambda a: a * 16 // 100))
             overlay = Image.alpha_composite(overlay, gl)
             dr = ImageDraw.Draw(overlay)
@@ -1330,13 +1585,7 @@ def produce(mode, seed, fmt, outdir):
             pose = dict(squash=st["squash"], sag=st["sag"], blink=blink,
                         mouth=mouth, wave=wave_amt, brow=brow,
                         pupil=(px, py))
-            if mode == "counting":
-                draw_actor(dr, spec["kind"], st["x"], rows[i - 1] - st["h"],
-                           sizes[i - 1], casts[i - 1], t, pose)
-            else:
-                draw_item(dr, spec["items"][i - 1], st["x"],
-                          rows[i - 1] - st["h"], sizes[i - 1], st["squash"],
-                          spec["color"], t)
+            draw_subject(dr, i, st["x"], rows[i - 1] - st["h"], pose, t)
 
         # big number / word pop on each count beat (with a wobble)
         cur = None
@@ -1346,14 +1595,27 @@ def produce(mode, seed, fmt, outdir):
         if cur:
             p = ease_out_back((t - cur.t) / 0.45)
             wob = math.sin((t - cur.t) * 9) * 5 * math.exp(-(t - cur.t) * 2.2)
-            label = str(cur.n) if mode == "counting" \
-                else spec["cname"].upper()
-            # a 9:16 frame leaves a lot of sky above a row of five characters —
-            # the count number is what fills it, so it has to be big
-            pop_number(overlay, W, label, W * 0.5,
-                       H * (0.17 if wide else 0.325),
-                       int((320 if mode == "counting" else 168) * k * p),
-                       (255, 255, 255), dark_theme, wob)
+            ly = H * (0.17 if wide else 0.325)
+            # a 9:16 frame leaves a lot of sky above a row of characters —
+            # this label is what fills it, so it has to be big
+            if mode == "counting":
+                pop_number(overlay, W, str(cur.n), W * 0.5, ly,
+                           int(320 * k * p), (255, 255, 255), dark_theme, wob)
+            elif mode == "abc":
+                # the letter itself is the lesson: draw it huge and coloured,
+                # with the word underneath
+                draw_big_letter(overlay, spec["letter"], W * 0.5,
+                                ly * 0.92, int(360 * k * p), theme, wob)
+                dr = ImageDraw.Draw(overlay)
+                sticker_text(dr, W, spec["words"][cur.n - 1].upper(),
+                             W * 0.5, ly + H * (0.075 if wide else 0.105),
+                             int(96 * k * min(p, 1.0)),
+                             (255, 255, 255), dark_theme)
+            else:
+                label = (spec["sname"].upper() if mode == "shapes"
+                         else spec["cname"].upper())
+                pop_number(overlay, W, label, W * 0.5, ly,
+                           int(168 * k * p), (255, 255, 255), dark_theme, wob)
             dr = ImageDraw.Draw(overlay)
 
         intro = scenes[0]
@@ -1436,21 +1698,13 @@ def produce(mode, seed, fmt, outdir):
         raise RuntimeError("ffmpeg failed")
 
     # --- COPPA-compliant metadata (Made for Kids = TRUE, always) ---
-    desc = (
-        f"{spec['meta_title']}\n\n"
-        "A calm, friendly learning video made with our own original "
-        "animation engine â€” original characters, original music, gentle "
-        "pacing. No third-party clips or songs.\n\n"
-        "For parents: this channel makes simple educational videos "
-        f"about {spec['lesson']}, colors, shapes and numbers for "
-        "preschoolers.\n\n#kidslearning #nurseryrhymes #toddlers"
-    )
+    # Tags describe what is ACTUALLY in the video. Do not pad this list with
+    # popular-but-unrelated terms: YouTube treats irrelevant tags as
+    # misleading metadata, which costs reach and can cost monetization.
     meta = dict(
         title=spec["meta_title"][:100],
-        description=desc,
-        tags=["kids learning", "toddler learning", "learn numbers",
-              "learn colors", "counting for kids", "preschool",
-              "kids animation", "educational video for toddlers"],
+        description=build_description(spec, mode, seed),
+        tags=MODE_TAGS[mode][:12],
         categoryId="27",
         privacyStatus="public",
         selfDeclaredMadeForKids=True,
@@ -1465,7 +1719,7 @@ def produce(mode, seed, fmt, outdir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="random",
-                    choices=["random", "counting", "colors"])
+                    choices=["random", "counting", "colors", "shapes", "abc"])
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--count", type=int, default=1)
     ap.add_argument("--format", default="shorts", choices=["shorts", "wide"])
@@ -1481,7 +1735,7 @@ def main():
     seed = args.seed if args.seed is not None else random.randrange(1, 10 ** 6)
     for i in range(args.count):
         mode = args.mode if args.mode != "random" \
-            else random.Random(seed).choice(["counting", "colors"])
+            else random.Random(seed).choice(list(MODE_TAGS))
         print(f"[{i + 1}/{args.count}] building {mode} (seed {seed})")
         produce(mode, seed, args.format, args.outdir)
         seed += 1 + random.randrange(40)

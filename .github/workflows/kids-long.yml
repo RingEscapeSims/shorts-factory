@@ -1,0 +1,145 @@
+# Builds ONE long-form (16:9) kids video and uploads it.
+#
+# COST WARNING — read before raising the frequency.
+# A long video is N short renders glued together. On a 2-core GitHub runner
+# a 28-second segment at supersample=2 takes roughly 8-12 minutes, so:
+#     4 minutes of video  ~=  7 segments   ~=  60-85 runner-minutes
+#     6 minutes of video  ~= 12 segments   ~= 100-140 runner-minutes
+# A PRIVATE repo has 2,000 free minutes/month. Daily long-form at 6 minutes
+# would alone consume ~3,600 and blow the budget. That is why this runs
+# three days a week at 4 minutes by default.
+#
+# If you want daily long-form, pick one:
+#   1. make the repo PUBLIC  -> Actions minutes become unlimited and free
+#   2. set supersample to 1  -> about 4x faster, slightly jaggier edges
+#   3. move rendering to a free always-on VM (see SETUP_PHONE.md)
+name: Kids long-form video
+
+on:
+  schedule:
+    - cron: "0 1 * * 1,3,5"     # 06:30 IST, Mon/Wed/Fri
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Target video length in minutes"
+        default: "4"
+        type: string
+      privacy:
+        description: "Privacy for this run"
+        default: "unlisted"
+        type: choice
+        options: [unlisted, public, private]
+      supersample:
+        description: "2 = ship quality, 1 = ~4x faster"
+        default: "2"
+        type: choice
+        options: ["2", "1"]
+
+concurrency:
+  group: kids-upload          # shares the lock with kids-daily.yml
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-long:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg and a friendly font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-comic-neue fonts-dejavu-core
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Install Python packages
+        run: pip install --quiet -r requirements.txt
+
+      - name: Restore cached voice model
+        id: voice-cache
+        uses: actions/cache@v4
+        with:
+          path: voices
+          key: piper-en_US-ljspeech-high-v1
+
+      - name: Download voice model (first run only)
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        run: python kids_studio.py --setup-voice
+
+      - name: Write credentials
+        env:
+          KIDS_TOKEN_JSON: ${{ secrets.KIDS_TOKEN_JSON }}
+          KIDS_CLIENT_SECRET_JSON: ${{ secrets.KIDS_CLIENT_SECRET_JSON }}
+          RT: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          if [ -n "$RT" ]; then
+            echo "Using YT_REFRESH_TOKEN (kids channel)."
+          elif [ -n "$KIDS_TOKEN_JSON" ]; then
+            printf '%s' "$KIDS_TOKEN_JSON" > token.json
+            printf '%s' "$KIDS_CLIENT_SECRET_JSON" > client_secret.json
+            echo "Using KIDS_TOKEN_JSON (kids channel)."
+          else
+            echo "::error::No kids credentials. This workflow deliberately"
+            echo "::error::does NOT fall back to the rings token, because a"
+            echo "::error::long kids video must not land on the rings channel."
+            exit 1
+          fi
+
+      - name: Build the long video
+        env:
+          KIDS_SS: ${{ github.event.inputs.supersample || '2' }}
+        run: |
+          mkdir -p queue published
+          python make_long.py \
+            --minutes "${{ github.event.inputs.minutes || '4' }}" \
+            --outdir queue
+
+      - name: Upload
+        env:
+          CI: "true"
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          PRIVACY="${{ github.event.inputs.privacy || '' }}"
+          ARGS="--dir queue --archive published"
+          if [ -n "$PRIVACY" ]; then ARGS="$ARGS --privacy $PRIVACY"; fi
+          python upload_youtube.py $ARGS | tee upload_out.txt
+
+      - name: Record what was published
+        if: success()
+        run: |
+          STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          grep -o 'https://youtube.com/[A-Za-z0-9_/-]*' upload_out.txt \
+            | while read -r url; do
+                echo "$STAMP  LONG  $url" >> uploads.log
+              done
+          if [ -z "$(git status --porcelain uploads.log)" ]; then
+            echo "Nothing new to log."; exit 0
+          fi
+          git config user.name  "shorts-factory-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uploads.log
+          git commit -m "log: long-form upload $STAMP"
+          git pull --rebase
+          git push
+
+      - name: Keep the render if something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-long-${{ github.run_id }}
+          path: |
+            queue/
+            upload_out.txt
+          retention-days: 7
+          if-no-files-found: ignore

@@ -8,41 +8,35 @@ cannot add repository secrets.
 
 ## Where things already stand
 
-The repo `RingEscapeSims/shorts-factory` is already live:
+The repo `RingEscapeSims/shorts-factory` is already live and runs **three**
+workflows:
 
-- **`daily.yml`** runs the **rings** engine at 13:00 and 22:00 UTC, using
-  the existing `CLIENT_SECRET_JSON` and `TOKEN_JSON` secrets. It has been
-  uploading since 5 Aug. **Nothing about it was changed.**
-- **`kids-daily.yml`** is the new kids workflow, at 03:30 and 12:30 UTC
-  (09:00 / 18:00 IST). It is not yet authorized.
+| Workflow | Engine | Schedule (UTC) | Credentials |
+|---|---|---|---|
+| `daily.yml` | rings | 13:00, 22:00 | `CLIENT_SECRET_JSON` + `TOKEN_JSON` |
+| `kids-daily.yml` | kids Shorts | 03:30, 12:30 | `YT_*` (see below) |
+| `kids-long.yml` | kids long-form | 01:00 Mon/Wed/Fri | `YT_*` (see below) |
 
-So Steps 1 and 2 below are already done for the rings channel. What you
-still have to decide is **which channel the kids videos publish to.**
+The rings workflow has been uploading since 5 Aug and **nothing about it
+was changed**. Do not touch `CLIENT_SECRET_JSON` or `TOKEN_JSON`.
 
-### The channel decision (do this first)
+**Your kids channel is on a different Google account**
+(`dhakechaharsh3@gmail.com`), so it needs its own credentials. That is what
+Steps 2–4 below create. `kids-long.yml` will refuse to run without them —
+deliberately, so a kids video can never land on the rings channel by
+accident.
 
-**Option A — separate kids channel (recommended).** Kids content on its own
-channel, as the project rules require. Made-for-Kids disables comments and
-personalised ads on whatever channel it lands on, and mixing cartoon
-counting videos with neon physics Shorts confuses both the algorithm and
-the audience. Cost: do Steps 0 and 2–4 below to get a second credential.
-
-**Option B — reuse the rings channel.** Zero setup: `kids-daily.yml`
-already falls back to `TOKEN_JSON` and will publish there, printing a
-warning when it does. Fast, but you inherit the problems above.
-
-If you pick A, carry on. If you pick B, skip to Step 5 and just run the
-workflow.
+> **Important:** do every step below while signed into
+> **dhakechaharsh3@gmail.com**, not the rings account. The easiest way to
+> avoid mix-ups is to use a fresh incognito window for the whole process.
 
 ---
 
-## Step 0 — Make the channel first
+## Step 0 — The channel — DONE
 
-Create the kids channel now if it does not exist, at youtube.com on your
-phone: profile picture -> Switch account -> Add channel. Keep kids content on
-its **own channel**, separate from anything else you post. Mixing audiences
-confuses the algorithm, and Made-for-Kids disables comments and
-personalised ads on the whole channel.
+You have already created it. Give it a name from `CHANNEL_STRATEGY.md`
+and claim the matching `@handle` now if you have not — handles are free
+and first-come.
 
 ---
 
@@ -154,16 +148,35 @@ Scheduled runs use the privacy from the video's metadata, which is
 
 ---
 
-## What it costs
+## What it costs — read this before raising the volume
 
-Free, with these ceilings:
+Free, but the compute ceiling is real and long-form blows through it.
 
-- **Actions minutes**: private repos get 2,000/month. Two videos a day at
-  ~20 min each is about 1,200/month. Comfortable, not unlimited. If you
-  raise the volume, either make the repo public (unlimited) or set the
-  workflow's `supersample` input to `1`, which quarters render time.
-- **YouTube API quota**: 10,000 units/day, and each upload costs 1,600 —
-  so **6 uploads/day is a hard ceiling** no matter what.
+A long video is just N Shorts glued together, so it costs N times as much
+to render. On a 2-core GitHub runner, one 28-second segment at
+supersample 2 takes roughly 8–12 minutes:
+
+| Output | Runner minutes each | Per month |
+|---|---|---|
+| 1 Short | 8–12 | 2/day = ~600 |
+| 4-minute long-form (7 segments) | 60–85 | 3/week = ~900 |
+| 6-minute long-form (12 segments) | 100–140 | **daily = ~3,600** |
+
+**A private repo gets 2,000 free minutes/month.** The default schedule
+(2 Shorts daily + one 4-minute long-form on Mon/Wed/Fri) lands around
+1,500 — inside the budget with a little headroom. **Daily long-form does
+not fit.** If you want it, pick one:
+
+1. **Make the repo public** — Actions minutes become unlimited and free.
+   There are no credentials in the code; `.gitignore` keeps them out.
+   This is the simplest fix.
+2. **Set `supersample` to 1** — about 4x faster, slightly jaggier outlines.
+3. **Move rendering off GitHub** to a free always-on VM (Oracle Cloud's
+   ARM free tier). Best long-term answer, and it sidesteps the Actions
+   acceptable-use question entirely. The scripts run there unchanged.
+
+- **YouTube API quota**: 10,000 units/day, each upload costs 1,600 —
+  **6 uploads/day is a hard ceiling** no matter what you do.
 
 ---
 

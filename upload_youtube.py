@@ -107,24 +107,39 @@ def get_service():
     return build("youtube", "v3", credentials=creds)
 
 
-# Filename prefixes produced by kids_studio.py. A video from that engine is
-# child-directed, so uploading it WITHOUT selfDeclaredMadeForKids=true would
-# be a COPPA violation — refuse rather than fall back to the generic default.
-KIDS_PREFIXES = ("counting_", "colors_", "shapes_", "letters_")
+# Everything the kids engines emit is child-directed, so uploading it
+# WITHOUT selfDeclaredMadeForKids=true would be a COPPA violation. Refuse
+# rather than fall back to the generic default.
+#
+# KEEP IN SYNC with kids_studio.MODE_TAGS and make_long.py. Adding a mode
+# without adding it here silently reopens the hole: a new "rhyme_" video
+# with a missing sidecar would upload as general-audience.
+KIDS_PREFIXES = ("counting_", "colors_", "shapes_", "abc_", "long_")
+KIDS_MODES = {"counting", "colors", "shapes", "abc", "long"}
 
 
 def load_meta(mp4_path):
     jpath = os.path.splitext(mp4_path)[0] + ".json"
     name = os.path.splitext(os.path.basename(mp4_path))[0]
+
+    if os.path.getsize(mp4_path) < 1024:
+        sys.exit(f"REFUSING to upload {name}: the file is {os.path.getsize(mp4_path)} "
+                 "bytes, which means the render was interrupted. Delete it "
+                 "and re-render.")
+
     if os.path.exists(jpath):
         with open(jpath) as fh:
             meta = json.load(fh)
-        if name.startswith(KIDS_PREFIXES) and not meta.get(
-                "selfDeclaredMadeForKids"):
+        # Two independent signals that this is a kids video: the filename
+        # and the mode recorded in the sidecar. Either one is enough.
+        is_kids = (name.startswith(KIDS_PREFIXES)
+                   or meta.get("mode") in KIDS_MODES)
+        if is_kids and not meta.get("selfDeclaredMadeForKids"):
             sys.exit(f"REFUSING to upload {name}: it came from the kids "
                      "engine but its metadata does not declare "
                      "selfDeclaredMadeForKids=true (COPPA requirement).")
         return meta
+
     if name.startswith(KIDS_PREFIXES):
         sys.exit(f"REFUSING to upload {name}: metadata sidecar {jpath} is "
                  "missing, and guessing the Made-for-Kids flag on a "

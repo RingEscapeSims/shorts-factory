@@ -18,6 +18,18 @@ Quick test: `python kids_studio.py --mode counting --seed 7 --outdir test`
 then extract frames with ffmpeg (`-ss <t> -frames:v 1`) and LOOK at them.
 Never ship a change without viewing frames at intro / mid / recap / outro.
 
+## Metadata rules (researched Aug 2026 — see CHANNEL_STRATEGY.md)
+
+- Tags must describe what is ACTUALLY in the video. Irrelevant tags are
+  "misleading metadata" under YouTube's spam policy and YouTube is scaling
+  up YPP suspensions for it. Cap at ~12 tags (`MODE_TAGS[mode][:12]`);
+  over-tagging alone can trigger spam flags.
+- Never put a trademarked channel or character name in a title/tag to
+  catch its traffic. That is trademark stuffing and it is enforced.
+- The description says the video is made by an original engine. Keep that
+  honest disclosure; the inauthentic-content policy is about UNDISCLOSED
+  mass production.
+
 ## Non-negotiable compliance rules (do not "optimize" these away)
 
 1. `kids_studio.py` metadata must ALWAYS write `selfDeclaredMadeForKids: true`.
@@ -82,11 +94,31 @@ Never ship a change without viewing frames at intro / mid / recap / outro.
 - Text is "sticker" style: white fill + dark outline via offset draws; the
   big count number pops with a decaying rotation wobble (pop_number).
 
-## How to add a new template (e.g. shapes, ABC letters, kindness stories)
+## Content formats that exist now
+
+| Mode | What it teaches | Variants possible |
+|---|---|---|
+| `counting` | numbers 1-5 (1-10 wide) | 5 species x palettes |
+| `colors` | one colour, five props | 6 colours |
+| `shapes` | one shape, five colours | 6 shapes |
+| `abc` | one letter, sound, 3 words | **26 letters** |
+| long-form | `make_long.py` shuffles the above | non-repeating order |
+
+`make_long.py` renders N segments (different mode + seed each) and joins
+them with ffmpeg `xfade`/`acrossfade`, adding title and goodbye cards and
+chapter timestamps in the description. It falls back to a hard-cut concat
+if the filter graph fails, rather than losing the whole render. Long-form
+is where watch-time lives; keep the running order non-repeating
+(`plan_segments` never places the same mode twice in a row).
+
+## How to add a new template (e.g. kindness stories, rhymes)
 
 1. Write a `build_<name>(seed, wide)` returning the same dict shape as
    `build_counting` (scenes list with tags intro/count/recap/outro, N,
-   title, meta_title, lesson, theme).
+   title, meta_title, lesson, theme). Register it in the `builders` dict
+   in `produce()`, add a `MODE_TAGS` entry, add it to `--mode` choices,
+   and extend `draw_subject()` — that closure is the ONLY place drawing
+   dispatches on mode, so ghosts and real frames can never diverge.
 2. If it needs new drawables, add a `draw_*` function in unit coordinates
    anchored at the feet (see `draw_actor` / `draw_item`), using only
    primitive shapes with squash applied through the `P()` helper.
