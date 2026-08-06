@@ -17,7 +17,9 @@ name: Kids long-form video
 
 on:
   schedule:
-    - cron: "0 1 * * 1,3,5"     # 06:30 IST, Mon/Wed/Fri
+    # 01:12 UTC ~= 06:42 IST, Mon/Wed/Fri. Off the hour on purpose — see
+    # the note in kids-daily.yml about scheduler congestion at :00.
+    - cron: "12 1 * * 1,3,5"
   workflow_dispatch:
     inputs:
       minutes:
@@ -116,7 +118,9 @@ jobs:
           python upload_youtube.py $ARGS | tee upload_out.txt
 
       - name: Record what was published
+        # Bookkeeping only — must never fail the job once the video is up.
         if: success()
+        continue-on-error: true
         run: |
           STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
           grep -o 'https://youtube.com/[A-Za-z0-9_/-]*' upload_out.txt \

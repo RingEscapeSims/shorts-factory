@@ -5,9 +5,16 @@ name: retry-failed-upload
 # of our steps execute. This workflow gives the run a second and third chance
 # instead of silently dropping a video.
 
+# Safe to retry because the only step that runs AFTER a successful upload is
+# the upload log, and that is marked continue-on-error in every workflow
+# listed here. Keep it that way: if a post-upload step can fail the job, a
+# retry re-renders and publishes a second video.
 on:
   workflow_run:
-    workflows: ["shorts-factory"]
+    workflows:
+      - "shorts-factory"          # rings
+      - "Daily kids videos"       # kids Shorts
+      - "Kids long-form video"    # kids long-form
     types: [completed]
 
 permissions:

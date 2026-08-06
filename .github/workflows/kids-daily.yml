@@ -10,8 +10,11 @@ name: Daily kids videos
 
 on:
   schedule:
-    - cron: "30 3 * * *"     # 09:00 IST
-    - cron: "30 12 * * *"    # 18:00 IST
+    # 03:38 & 12:41 UTC ~= 09:08 & 18:11 IST. Deliberately off the top of
+    # the hour and off :00/:30 — GitHub's shared scheduler is most congested
+    # there and scheduled runs queue behind the spike.
+    - cron: "38 3 * * *"
+    - cron: "41 12 * * *"
   workflow_dispatch:
     inputs:
       count:
@@ -129,7 +132,11 @@ jobs:
           python upload_youtube.py $ARGS | tee upload_out.txt
 
       - name: Record what was published
+        # Bookkeeping only. It must never fail the job: the video is already
+        # published by this point, and a red run here would make a retry
+        # republish it.
         if: success()
+        continue-on-error: true
         run: |
           STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
           grep -o 'https://youtube.com/shorts/[A-Za-z0-9_-]*' upload_out.txt \
