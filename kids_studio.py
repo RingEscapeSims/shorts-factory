@@ -634,9 +634,12 @@ def draw_actor(dr, kind, cx, ground_y, s, cols, t, pose):
     sag = pose.get("sag", 0.0)          # +ve: ears/toppers drag down
     blink = pose.get("blink", False)
     mouth = pose.get("mouth", 0.0)      # 0..1 open amount
-    wave = pose.get("wave", 0.0)        # 0..1 arm raised
+    wave = pose.get("wave", 0.0)        # 0..1 right arm raised
     brow = pose.get("brow", 0.0)        # 0..1 eyebrows up
     pupil = pose.get("pupil", (0.0, 0.0))
+    leg_lift = pose.get("leg_lift", 0.0)    # -1..1 stride phase
+    arm_swing = pose.get("arm_swing", 0.0)  # -1..1 counter-swing
+    lean = pose.get("lean", 0.0)            # -1..1 body tilt into motion
 
     sx = s * (1 + (1 - squash) * 0.55)
     sy = s * squash
@@ -646,12 +649,23 @@ def draw_actor(dr, kind, cx, ground_y, s, cols, t, pose):
     lw = max(2, int(s * 0.055))                      # ink line weight
 
     def P(x, y):
-        return (cx + x * sx, ground_y + y * sy)
+        # `lean` shears the figure about the feet: the further a point is
+        # above the ground the further it shifts sideways, so the body
+        # tilts as one piece instead of the head sliding off the shoulders.
+        return (cx + x * sx + lean * (-y) * 0.15 * sx, ground_y + y * sy)
+
+    def _box(x, y, rx, ry):
+        """Bounding box anchored at the shape's CENTRE.
+
+        Taking P() of two opposite corners would shear them by different
+        amounts (they sit at different heights), squashing the shape. Shear
+        the centre once, then size the box around it.
+        """
+        mx, my = P(x, y)
+        return [mx - rx * sx, my - ry * sy, mx + rx * sx, my + ry * sy]
 
     def E(x, y, rx, ry, fill, line=True):
-        a, b = P(x - rx, y - ry)
-        c, d = P(x + rx, y + ry)
-        dr.ellipse([a, b, c, d], fill=fill,
+        dr.ellipse(_box(x, y, rx, ry), fill=fill,
                    outline=ink if line else None, width=lw if line else 0)
 
     def POLY(pts, fill, line=True):
@@ -664,79 +678,113 @@ def draw_actor(dr, kind, cx, ground_y, s, cols, t, pose):
     # (which is how cel shading works anyway: a hard-edged shade shape).
     def SHADE(x, y, rx, ry, amt):
         """Form shadow (no outline) — sells volume."""
-        col = _mix(body, ink, amt)
-        a, b = P(x - rx, y - ry)
-        c, d = P(x + rx, y + ry)
-        dr.ellipse([a, b, c, d], fill=col)
+        dr.ellipse(_box(x, y, rx, ry), fill=_mix(body, ink, amt))
 
     def HILITE(x, y, rx, ry, amt):
-        col = _mix(body, (255, 255, 255), amt)
-        a, b = P(x - rx, y - ry)
-        c, d = P(x + rx, y + ry)
-        dr.ellipse([a, b, c, d], fill=col)
+        dr.ellipse(_box(x, y, rx, ry), fill=_mix(body, (255, 255, 255), amt))
+
+    def LIMB(pts, width, fill):
+        """A tapered jointed limb: outlined stroke, then fill inside it.
+
+        Drawing the ink pass first at a wider stroke and the body colour
+        second gives a clean cel outline that follows the joint, which
+        stuck-on circles never did.
+        """
+        scr = [P(x, y) for x, y in pts]
+        wpx = width * (sx + sy) / 2
+        dr.line(scr, fill=ink, width=int(wpx * 2 + lw * 2), joint="curve")
+        for (jx, jy) in scr:                      # round off the joints
+            r = wpx + lw
+            dr.ellipse([jx - r, jy - r, jx + r, jy + r], fill=ink)
+        dr.line(scr, fill=fill, width=int(wpx * 2), joint="curve")
+        for (jx, jy) in scr:
+            dr.ellipse([jx - wpx, jy - wpx, jx + wpx, jy + wpx], fill=fill)
 
     # species toppers first (behind head); sag = follow-through lag
     if kind == "bunny":
         for sgn in (-1, 1):
             tip = sag * 0.35
-            E(sgn * 0.30, -2.35 + tip, 0.17, 0.55 - abs(sag) * 0.10, body)
-            E(sgn * 0.30, -2.30 + tip, 0.085, 0.38 - abs(sag) * 0.08,
+            E(sgn * 0.30, -2.57 + tip, 0.17, 0.55 - abs(sag) * 0.10, body)
+            E(sgn * 0.30, -2.52 + tip, 0.085, 0.38 - abs(sag) * 0.08,
               inner, line=False)
     elif kind == "bear":
         for sgn in (-1, 1):
-            E(sgn * 0.55, -2.05 + sag * 0.18, 0.22, 0.22, body)
-            E(sgn * 0.55, -2.05 + sag * 0.18, 0.11, 0.11, inner, line=False)
+            E(sgn * 0.55, -2.27 + sag * 0.18, 0.22, 0.22, body)
+            E(sgn * 0.55, -2.27 + sag * 0.18, 0.11, 0.11, inner, line=False)
     elif kind == "cat":
         for sgn in (-1, 1):
             lag = sag * 0.22
-            POLY([(sgn * 0.22, -1.92), (sgn * 0.62, -2.45 + lag),
-                  (sgn * 0.72, -1.80)], body)
-            POLY([(sgn * 0.32, -1.94), (sgn * 0.58, -2.28 + lag),
-                  (sgn * 0.63, -1.86)], inner, line=False)
+            POLY([(sgn * 0.22, -2.14), (sgn * 0.62, -2.67 + lag),
+                  (sgn * 0.72, -2.02)], body)
+            POLY([(sgn * 0.32, -2.16), (sgn * 0.58, -2.50 + lag),
+                  (sgn * 0.63, -2.08)], inner, line=False)
     elif kind == "frog":
         for sgn in (-1, 1):
-            E(sgn * 0.36, -2.12 + sag * 0.14, 0.27, 0.27, body)
+            E(sgn * 0.36, -2.34 + sag * 0.14, 0.27, 0.27, body)
 
-    # ---- body: fill, form shadow on the lower-right, belly, rim light ----
-    E(0, -0.55, 0.64, 0.58, body)
-    SHADE(0.16, -0.48, 0.50, 0.46, 0.16)
-    E(0, -0.50, 0.40, 0.42, belly, line=False)
-    HILITE(-0.34, -0.82, 0.14, 0.10, 0.34)
+    # ---- tail (behind the body) ----
+    if kind in ("cat", "bear"):
+        tl = 0.62 if kind == "cat" else 0.28
+        tsw = math.sin(t * 1.9 + sag * 3) * 0.16
+        tail_pts = [(-0.54 - i * 0.17, -0.62 + i * 0.10 * (1 + tsw)
+                     - (i / 3.0) ** 2 * tl)
+                    for i in range(4)]
+        LIMB(tail_pts, 0.12 if kind == "cat" else 0.18, body)
+    elif kind == "bunny":
+        E(-0.64, -0.52, 0.19, 0.19, belly)
 
-    # left arm always at side; right arm can wave hello
-    E(-0.62, -0.72, 0.14, 0.14, body)
-    if wave > 0.02:
-        w = ease_in_out(wave)
-        ax = 0.62 + 0.16 * w + math.sin(t * 9.0) * 0.07 * w
-        ay = -0.72 - 0.85 * w
-        E((ax + 0.62) / 2, (ay - 0.72) / 2, 0.11, 0.11, body)   # forearm
-        E(ax, ay, 0.15, 0.15, body)
-    else:
-        E(0.62, -0.72, 0.14, 0.14, body)
-    for sgn in (-1, 1):                              # feet
-        E(sgn * 0.28, -0.06, 0.19, 0.10, dark)
+    # ---- legs: real jointed limbs, not feet stuck to the body ----
+    # Hip -> knee -> foot. The body sits high enough that a length of leg is
+    # actually visible below it; before this the legs were drawn entirely
+    # inside the body ellipse and only the feet peeked out.
+    for sgn in (-1, 1):
+        lift = leg_lift * (1 if sgn > 0 else -1)
+        hip = (sgn * 0.28, -0.64)
+        knee = (sgn * 0.33, -0.34 + lift * 0.12)
+        ankle = (sgn * 0.29, -0.05 + lift * 0.18)
+        LIMB([hip, knee, ankle], 0.14, body)
+        E(ankle[0] + sgn * 0.05, ankle[1] + 0.02, 0.21, 0.10, dark)
+
+    # ---- body: fill, form shadow, belly, rim light ----
+    E(0, -0.86, 0.60, 0.54, body)
+    SHADE(0.18, -0.78, 0.47, 0.43, 0.16)
+    E(0, -0.80, 0.38, 0.39, belly, line=False)
+    HILITE(-0.33, -1.10, 0.14, 0.10, 0.34)
+
+    # ---- arms: shoulder -> elbow -> hand ----
+    for sgn in (-1, 1):
+        raise_amt = ease_in_out(wave) if (sgn > 0 and wave > 0.02) else 0.0
+        swing = arm_swing * (1 if sgn > 0 else -1)
+        sh = (sgn * 0.46, -1.08)
+        if raise_amt > 0.02:
+            wob = math.sin(t * 9.0) * 0.16 * raise_amt
+            elbow = (sgn * (0.78 + 0.10 * raise_amt),
+                     -1.08 - 0.40 * raise_amt)
+            hand = (sgn * (0.86 + 0.22 * raise_amt) + wob * 0.5,
+                    -1.08 - 0.95 * raise_amt)
+        else:
+            elbow = (sgn * 0.74, -0.88 + swing * 0.12)
+            hand = (sgn * 0.80, -0.62 + swing * 0.20)
+        LIMB([sh, elbow, hand], 0.12, body)
+        E(hand[0], hand[1], 0.15, 0.15, body)
 
     # ---- head: fill, form shadow, rim light ----
-    E(0, -1.45, 0.80, 0.78, body)
-    SHADE(0.30, -1.30, 0.52, 0.52, 0.14)
-    HILITE(-0.40, -1.80, 0.20, 0.13, 0.34)
+    E(0, -1.70, 0.76, 0.74, body)
+    SHADE(0.30, -1.56, 0.50, 0.50, 0.14)
+    HILITE(-0.40, -2.03, 0.20, 0.13, 0.34)
 
-    eye_y = -2.12 if kind == "frog" else -1.55
+    eye_y = -2.34 if kind == "frog" else -1.77
     eye_x = 0.36 if kind == "frog" else 0.30
     px, py = pupil
     for sgn in (-1, 1):
         if brow > 0.02 and kind != "frog":           # eyebrows pop up
-            a, b = P(sgn * eye_x - 0.14, eye_y - 0.40 - 0.12 * brow)
-            c, d = P(sgn * eye_x + 0.14, eye_y - 0.28 - 0.12 * brow)
-            dr.arc([a, b, c, d], 200, 340, fill=(70, 45, 45),
-                   width=max(2, int(s * 0.045)))
+            dr.arc(_box(sgn * eye_x, eye_y - 0.34 - 0.12 * brow, 0.14, 0.06),
+                   200, 340, fill=(70, 45, 45), width=max(2, int(s * 0.045)))
         if blink:
-            a, b = P(sgn * eye_x - 0.16, eye_y - 0.02)
-            c, d = P(sgn * eye_x + 0.16, eye_y + 0.05)
-            dr.ellipse([a, b, c, d], fill=body)
-            a, b = P(sgn * eye_x - 0.15, eye_y + 0.01)
-            c, d = P(sgn * eye_x + 0.15, eye_y + 0.05)
-            dr.rectangle([a, b, c, d], fill=(40, 30, 30))
+            dr.ellipse(_box(sgn * eye_x, eye_y + 0.015, 0.16, 0.035),
+                       fill=body)
+            bx0, by0, bx1, by1 = _box(sgn * eye_x, eye_y + 0.03, 0.15, 0.02)
+            dr.rectangle([bx0, by0, bx1, by1], fill=(40, 30, 30))
         else:
             E(sgn * eye_x, eye_y, 0.21, 0.21, (255, 255, 255))
             E(sgn * eye_x + 0.04 + px, eye_y + 0.02 + py,
@@ -744,24 +792,22 @@ def draw_actor(dr, kind, cx, ground_y, s, cols, t, pose):
             E(sgn * eye_x + 0.08 + px, eye_y - 0.04 + py,
               0.045, 0.045, (255, 255, 255), line=False)
     for sgn in (-1, 1):                              # cheeks
-        E(sgn * 0.52, -1.28, 0.105, 0.085, (250, 160, 170), line=False)
+        E(sgn * 0.52, -1.50, 0.105, 0.085, (250, 160, 170), line=False)
 
     if kind == "duck":
         if mouth > 0.15:
             gap = 0.05 + mouth * 0.10
-            E(0, -1.28 - gap / 2, 0.24, 0.10, (246, 150, 40))
-            E(0, -1.18 + gap / 2, 0.20, 0.08, (222, 126, 24))
+            E(0, -1.50 - gap / 2, 0.24, 0.10, (246, 150, 40))
+            E(0, -1.40 + gap / 2, 0.20, 0.08, (222, 126, 24))
         else:
-            E(0, -1.24, 0.24, 0.13, (246, 150, 40))
+            E(0, -1.46, 0.24, 0.13, (246, 150, 40))
     elif mouth > 0.12:
         op = 0.06 + 0.17 * mouth
-        E(0, -1.16, 0.10 + 0.05 * mouth, op, (120, 45, 45))
-        E(0, -1.16 + op * 0.55, 0.07, op * 0.45, (235, 120, 120),
+        E(0, -1.38, 0.10 + 0.05 * mouth, op, (120, 45, 45))
+        E(0, -1.38 + op * 0.55, 0.07, op * 0.45, (235, 120, 120),
           line=False)
     else:
-        a, b = P(-0.12, -1.26)
-        c, d = P(0.12, -1.10)
-        dr.arc([a, b, c, d], 20, 160, fill=(90, 55, 55),
+        dr.arc(_box(0, -1.40, 0.12, 0.08), 20, 160, fill=(90, 55, 55),
                width=max(2, int(s * 0.05)))
 
 
@@ -953,49 +999,251 @@ def draw_big_letter(overlay, letter, cx, cy, size, col, rot_deg=0.0):
 
 
 # ---------------------------------------------------------------- scenery --
-def build_background(W, H, ground_y, rng):
+# Seven distinct settings. Before this existed every video was the same
+# meadow, which is the main reason the output "all looked the same" no
+# matter how much the characters varied. Each biome changes the sky
+# gradient, the ground colours, the skyline silhouettes, the scatter props
+# and the ambient light tint, so two videos in different biomes read as
+# different shows rather than different seeds.
+BIOMES = {
+    "meadow": dict(
+        sky=[(120, 190, 250), (140, 200, 252)], sky_bot=(215, 240, 255),
+        far=[(150, 214, 160), (138, 208, 150)],
+        ground=[(96, 200, 104), (72, 172, 92)],
+        tuft=(60, 150, 78), sun=True, label="a sunny meadow"),
+    "beach": dict(
+        sky=[(126, 200, 246), (150, 214, 250)], sky_bot=(255, 236, 205),
+        far=[(96, 186, 214), (72, 166, 200)],
+        ground=[(246, 224, 168), (232, 204, 142)],
+        tuft=(214, 188, 128), sun=True, label="a sandy beach"),
+    "forest": dict(
+        sky=[(150, 212, 236), (176, 224, 240)], sky_bot=(224, 244, 232),
+        far=[(96, 154, 108), (74, 132, 92)],
+        ground=[(120, 182, 104), (94, 156, 84)],
+        tuft=(64, 122, 66), sun=True, label="a friendly forest"),
+    "night": dict(
+        sky=[(38, 48, 104), (52, 64, 128)], sky_bot=(104, 118, 176),
+        far=[(58, 72, 122), (46, 58, 104)],
+        ground=[(72, 96, 132), (56, 76, 112)],
+        tuft=(48, 68, 100), sun=False, label="a starry night"),
+    "farm": dict(
+        sky=[(142, 200, 246), (168, 214, 250)], sky_bot=(248, 238, 206),
+        far=[(158, 196, 126), (140, 180, 112)],
+        ground=[(168, 208, 110), (140, 184, 92)],
+        tuft=(112, 156, 74), sun=True, label="a happy farm"),
+    "snow": dict(
+        sky=[(168, 202, 238), (188, 218, 246)], sky_bot=(238, 248, 255),
+        far=[(216, 232, 246), (200, 220, 240)],
+        ground=[(246, 250, 255), (226, 238, 250)],
+        tuft=(198, 216, 236), sun=True, label="a snowy day"),
+    "garden": dict(
+        sky=[(255, 198, 168), (252, 214, 180)], sky_bot=(255, 238, 214),
+        far=[(150, 200, 146), (132, 186, 132)],
+        ground=[(126, 196, 116), (102, 172, 98)],
+        tuft=(74, 146, 78), sun=True, label="a flower garden"),
+}
+
+
+def _blob_row(dr, W, y, h, colour, rng, n=5):
+    """Overlapping ellipses -> a soft hill/dune/drift silhouette."""
+    for i in range(n):
+        cx = W * (i + rng.uniform(-0.35, 0.35)) / max(n - 1, 1)
+        rw = W * rng.uniform(0.26, 0.46)
+        rh = h * rng.uniform(0.7, 1.25)
+        dr.ellipse([cx - rw, y - rh, cx + rw, y + rh * 3], fill=colour)
+
+
+def draw_skyline(dr, W, H, ground_y, biome, rng):
+    """The silhouette layer that most defines which place this is.
+
+    Everything here is anchored to `hz`, the horizon, NOT to ground_y. The
+    front hill ellipse is drawn afterwards and rises to about ground_y -
+    0.06H in the middle, so anything placed at ground_y gets buried by it.
+    """
+    b = BIOMES[biome]
+    hz = ground_y - H * 0.075
+    if biome == "forest":
+        for i in range(7):
+            tx = W * (i + rng.uniform(-0.3, 0.3)) / 6
+            th = H * rng.uniform(0.10, 0.17)
+            tw = W * rng.uniform(0.030, 0.050)
+            dr.rectangle([tx - tw * 0.18, hz - th * 0.35,
+                          tx + tw * 0.18, hz + H * 0.02],
+                         fill=(112, 82, 56))
+            for lyr in range(3):                     # stacked pine tiers
+                sp = 1.0 - lyr * 0.26
+                yy = hz - th * (0.30 + lyr * 0.30)
+                dr.polygon([(tx, yy - th * 0.42),
+                            (tx + tw * sp, yy),
+                            (tx - tw * sp, yy)],
+                           fill=(78 + lyr * 10, 140 + lyr * 12, 88 + lyr * 8))
+    elif biome == "beach":
+        sea_top = hz - H * 0.11
+        dr.rectangle([0, sea_top, W, hz + H * 0.05], fill=(64, 168, 206))
+        dr.rectangle([0, sea_top, W, sea_top + H * 0.020],
+                     fill=(48, 146, 190))             # darker far water
+        for i in range(7):                            # foam lines
+            wy = sea_top + H * 0.022 + H * 0.016 * i
+            dr.line([0, wy, W, wy], fill=(158, 218, 238),
+                    width=max(2, int(H * 0.0032)))
+        for px in (W * 0.13, W * 0.88):               # palms
+            ph = H * rng.uniform(0.16, 0.22)
+            dr.line([px, hz, px - W * 0.02, hz - ph],
+                    fill=(140, 104, 68), width=max(4, int(W * 0.010)))
+            top = (px - W * 0.02, hz - ph)
+            for a in range(6):
+                ang = math.pi + a * math.pi / 5
+                dr.ellipse([top[0] + math.cos(ang) * W * 0.05 - W * 0.038,
+                            top[1] + math.sin(ang) * H * 0.018 - H * 0.016,
+                            top[0] + math.cos(ang) * W * 0.05 + W * 0.038,
+                            top[1] + math.sin(ang) * H * 0.018 + H * 0.016],
+                           fill=(74, 168, 96))
+    elif biome == "farm":
+        bx, by = W * 0.78, hz + H * 0.010
+        bw, bh = W * 0.26, H * 0.16
+        dr.rectangle([bx - bw / 2, by - bh, bx + bw / 2, by],
+                     fill=(206, 82, 74))
+        dr.polygon([(bx - bw * 0.60, by - bh), (bx + bw * 0.60, by - bh),
+                    (bx, by - bh * 1.55)], fill=(168, 60, 56))
+        dr.rectangle([bx - bw * 0.15, by - bh * 0.55, bx + bw * 0.15, by],
+                     fill=(122, 72, 48))
+        for i in range(11):                           # fence
+            fx = W * 0.02 + i * W * 0.055
+            dr.rectangle([fx, hz - H * 0.045, fx + W * 0.008,
+                          hz + H * 0.005], fill=(238, 232, 214))
+        for ry in (0.030, 0.014):
+            dr.rectangle([W * 0.02, hz - H * ry, W * 0.62,
+                          hz - H * ry + H * 0.007],
+                         fill=(238, 232, 214))
+    elif biome == "snow":
+        for i in range(6):                            # bare trees
+            tx = W * (i + rng.uniform(-0.25, 0.25)) / 5
+            th = H * rng.uniform(0.07, 0.12)
+            dr.line([tx, hz, tx, hz - th],
+                    fill=(126, 100, 84), width=max(3, int(W * 0.006)))
+            for s in (-1, 1):
+                dr.line([tx, hz - th * 0.72,
+                         tx + s * W * 0.022, hz - th * 1.02],
+                        fill=(126, 100, 84), width=max(2, int(W * 0.004)))
+            dr.ellipse([tx - W * 0.030, hz - th * 1.16,
+                        tx + W * 0.030, hz - th * 0.94],
+                       fill=(244, 250, 255))
+    elif biome == "garden":
+        for i in range(12):                           # picket fence
+            fx = W * 0.01 + i * W * 0.085
+            dr.polygon([(fx, hz - H * 0.05),
+                        (fx + W * 0.018, hz - H * 0.05),
+                        (fx + W * 0.018, hz),
+                        (fx, hz)], fill=(250, 246, 238))
+            dr.polygon([(fx, hz - H * 0.05),
+                        (fx + W * 0.009, hz - H * 0.062),
+                        (fx + W * 0.018, hz - H * 0.05)],
+                       fill=(250, 246, 238))
+    elif biome == "night":
+        pass                                          # moon/stars go on top
+    else:                                             # meadow
+        for fx in (0.12, 0.55, 0.86):
+            tx = fx * W + rng.uniform(-W * 0.04, W * 0.04)
+            ty = hz - H * 0.035
+            tw = W * 0.012
+            dr.rectangle([tx - tw / 2, ty - H * 0.01, tx + tw / 2,
+                          ty + H * 0.02], fill=(124, 92, 60))
+            for (dx, dy, r) in [(-0.7, -0.4, 0.85), (0.7, -0.4, 0.85),
+                                (0, -1.0, 1.0), (0, -0.3, 1.05)]:
+                r *= W * 0.022
+                cxx = tx + dx * W * 0.018
+                cyy = ty - H * 0.012 + dy * W * 0.018
+                dr.ellipse([cxx - r, cyy - r, cxx + r, cyy + r],
+                           fill=(96, 176, 108))
+
+
+def scatter_props(dr, W, H, ground_y, biome, rng):
+    """Small things on the ground that sell the place."""
+    if biome in ("meadow", "garden"):
+        n = 7 if biome == "meadow" else 12
+        for _ in range(n):
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.012, 0.060) * H
+            pet = hsv255(rng.random(), 0.62, 1.0)
+            r = W * 0.008
+            for i in range(5):
+                a = i * 2 * math.pi / 5
+                dr.ellipse([x + math.cos(a) * r * 1.6 - r,
+                            y + math.sin(a) * r * 1.6 - r,
+                            x + math.cos(a) * r * 1.6 + r,
+                            y + math.sin(a) * r * 1.6 + r], fill=pet)
+            dr.ellipse([x - r, y - r, x + r, y + r], fill=(255, 214, 80))
+    elif biome == "beach":
+        for _ in range(9):                            # shells and pebbles
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.015, 0.065) * H
+            r = W * rng.uniform(0.006, 0.012)
+            col = rng.choice([(255, 226, 226), (252, 210, 186),
+                              (232, 220, 236), (255, 240, 214)])
+            dr.ellipse([x - r, y - r * 0.7, x + r, y + r * 0.7], fill=col)
+    elif biome == "forest":
+        for _ in range(7):                            # toadstools
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.015, 0.060) * H
+            r = W * rng.uniform(0.008, 0.014)
+            dr.rectangle([x - r * 0.32, y - r * 0.5, x + r * 0.32, y + r * 0.6],
+                         fill=(248, 242, 228))
+            dr.ellipse([x - r, y - r * 1.1, x + r, y - r * 0.1],
+                       fill=(226, 96, 92))
+            dr.ellipse([x - r * 0.4, y - r * 0.9, x - r * 0.1, y - r * 0.6],
+                       fill=(252, 246, 236))
+    elif biome == "farm":
+        for _ in range(8):                            # hay tufts
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.015, 0.055) * H
+            for s in (-1, 0, 1):
+                dr.line([x, y, x + s * W * 0.010, y - H * 0.012],
+                        fill=(224, 196, 110), width=max(2, int(W * 0.003)))
+    elif biome == "snow":
+        for _ in range(10):                           # snow lumps
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.020, 0.070) * H
+            r = W * rng.uniform(0.010, 0.020)
+            dr.ellipse([x - r, y - r * 0.5, x + r, y + r * 0.5],
+                       fill=(255, 255, 255))
+    elif biome == "night":
+        for _ in range(6):                            # glow-bugs resting
+            x = rng.uniform(0.03, 0.97) * W
+            y = ground_y + rng.uniform(0.015, 0.055) * H
+            r = W * 0.005
+            dr.ellipse([x - r * 2, y - r * 2, x + r * 2, y + r * 2],
+                       fill=(190, 210, 140))
+            dr.ellipse([x - r, y - r, x + r, y + r], fill=(248, 252, 200))
+
+
+def build_background(W, H, ground_y, rng, biome="meadow"):
+    b = BIOMES.get(biome, BIOMES["meadow"])
     yy = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
-    sky_top = np.array(rng.choice([(120, 190, 250), (140, 200, 252),
-                                   (255, 190, 150)]), dtype=np.float32)
-    sky_bot = np.array((215, 240, 255), dtype=np.float32)
+    sky_top = np.array(rng.choice(b["sky"]), dtype=np.float32)
+    sky_bot = np.array(b["sky_bot"], dtype=np.float32)
     bg = sky_top[None, None, :] * (1 - yy) + sky_bot[None, None, :] * yy
     bg = np.repeat(bg, W, axis=1)
     im = Image.fromarray(np.clip(bg, 0, 255).astype(np.uint8))
     dr = ImageDraw.Draw(im)
-    # distant pale hill (parallax depth)
-    dr.ellipse([-W * 0.2, ground_y - H * 0.13, W * 0.75, ground_y + H * 0.3],
-               fill=(150, 214, 160))
-    dr.ellipse([W * 0.4, ground_y - H * 0.11, W * 1.3, ground_y + H * 0.3],
-               fill=(138, 208, 150))
-    # simple round trees on the far hill
-    for fx in (0.12, 0.55, 0.86):
-        tx, ty = fx * W + rng.uniform(-W * 0.04, W * 0.04), ground_y - H * 0.035
-        tw = W * 0.012
-        dr.rectangle([tx - tw / 2, ty - H * 0.01, tx + tw / 2, ty + H * 0.02],
-                     fill=(124, 92, 60))
-        for (dx, dy, r) in [(-0.7, -0.4, 0.85), (0.7, -0.4, 0.85),
-                            (0, -1.0, 1.0), (0, -0.3, 1.05)]:
-            r *= W * 0.022
-            dr.ellipse([tx + dx * W * 0.018 - r, ty - H * 0.012 + dy * W * 0.018 - r,
-                        tx + dx * W * 0.018 + r, ty - H * 0.012 + dy * W * 0.018 + r],
-                       fill=(96, 176, 108))
-    g1, g2 = (96, 200, 104), (72, 172, 92)
+
+    if biome == "night":                              # stars before anything
+        for _ in range(90):
+            sx, sy = rng.uniform(0, W), rng.uniform(0, ground_y * 0.85)
+            r = W * rng.uniform(0.0012, 0.0032)
+            a = rng.randint(150, 255)
+            dr.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(255, 255, 240, a))
+
+    f1, f2 = b["far"]
+    _blob_row(dr, W, ground_y - H * 0.055, H * 0.10, f1, rng, 4)
+    _blob_row(dr, W, ground_y - H * 0.020, H * 0.075, f2, rng, 5)
+    draw_skyline(dr, W, H, ground_y, biome, rng)
+
+    g1, g2 = b["ground"]
     dr.ellipse([-W * 0.35, ground_y - H * 0.06, W * 1.35, H * 1.5], fill=g1)
     dr.ellipse([-W * 0.55, ground_y + H * 0.05, W * 0.9, H * 1.6], fill=g2)
-    flowers = [(rng.uniform(0.05, 0.95), rng.uniform(0.015, 0.06))
-               for _ in range(7)]
-    for fx, fy in flowers:
-        x, y = fx * W, ground_y + fy * H
-        pet = hsv255(rng.random(), 0.6, 1.0)
-        r = W * 0.008
-        for i in range(5):
-            a = i * 2 * math.pi / 5
-            dr.ellipse([x + math.cos(a) * r * 1.6 - r,
-                        y + math.sin(a) * r * 1.6 - r,
-                        x + math.cos(a) * r * 1.6 + r,
-                        y + math.sin(a) * r * 1.6 + r], fill=pet)
-        dr.ellipse([x - r, y - r, x + r, y + r], fill=(255, 214, 80))
-    # grass tufts along the ground line
+    scatter_props(dr, W, H, ground_y, biome, rng)
+
+    tuft = b["tuft"]
     for _ in range(26):
         gx = rng.uniform(0, W)
         gy = ground_y + rng.uniform(-H * 0.002, H * 0.03)
@@ -1003,34 +1251,42 @@ def build_background(W, H, ground_y, rng):
         for db in (-1, 0, 1):
             dr.line([gx + db * W * 0.003, gy,
                      gx + db * W * 0.006, gy - gh * (1 - abs(db) * 0.3)],
-                    fill=(60, 150, 78), width=max(2, int(W * 0.0025)))
+                    fill=tuft, width=max(2, int(W * 0.0025)))
     return np.asarray(im, dtype=np.uint8)
 
 
-def draw_sun_clouds(dr, W, H, t, clouds):
+def draw_sun_clouds(dr, W, H, t, clouds, biome="meadow"):
     sx, sy, sr = W * 0.82, H * 0.14, W * 0.065
-    # soft glow halo
-    for gi, ga in ((2.0, 30), (1.55, 55)):
-        dr.ellipse([sx - sr * gi, sy - sr * gi, sx + sr * gi, sy + sr * gi],
-                   fill=(255, 236, 150, ga))
-    for i in range(12):
-        a = t * 0.25 + i * math.pi / 6
-        x1 = sx + math.cos(a) * sr * 1.25
-        y1 = sy + math.sin(a) * sr * 1.25
-        x2 = sx + math.cos(a) * sr * 1.75
-        y2 = sy + math.sin(a) * sr * 1.75
-        dr.line([x1, y1, x2, y2], fill=(255, 216, 80, 255),
-                width=max(4, int(W * 0.008)))
-    dr.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(255, 224, 96, 255))
-    dr.ellipse([sx - sr * 0.72, sy - sr * 0.72, sx + sr * 0.72,
-                sy + sr * 0.72], fill=(255, 236, 140, 255))
+    if BIOMES.get(biome, BIOMES["meadow"])["sun"]:
+        for gi, ga in ((2.0, 30), (1.55, 55)):       # soft glow halo
+            dr.ellipse([sx - sr * gi, sy - sr * gi, sx + sr * gi,
+                        sy + sr * gi], fill=(255, 236, 150, ga))
+        for i in range(12):
+            a = t * 0.25 + i * math.pi / 6
+            dr.line([sx + math.cos(a) * sr * 1.25, sy + math.sin(a) * sr * 1.25,
+                     sx + math.cos(a) * sr * 1.75, sy + math.sin(a) * sr * 1.75],
+                    fill=(255, 216, 80, 255), width=max(4, int(W * 0.008)))
+        dr.ellipse([sx - sr, sy - sr, sx + sr, sy + sr],
+                   fill=(255, 224, 96, 255))
+        dr.ellipse([sx - sr * 0.72, sy - sr * 0.72, sx + sr * 0.72,
+                    sy + sr * 0.72], fill=(255, 236, 140, 255))
+        cloud_col = (255, 255, 255, 235)
+    else:
+        # crescent moon: a bright disc with a sky-coloured bite taken out
+        dr.ellipse([sx - sr * 1.9, sy - sr * 1.9, sx + sr * 1.9,
+                    sy + sr * 1.9], fill=(240, 244, 210, 34))
+        dr.ellipse([sx - sr, sy - sr, sx + sr, sy + sr],
+                   fill=(250, 250, 220, 255))
+        bite = BIOMES["night"]["sky"][0]
+        dr.ellipse([sx - sr * 1.45, sy - sr * 1.15, sx + sr * 0.55,
+                    sy + sr * 0.85], fill=(bite[0], bite[1], bite[2], 255))
+        cloud_col = (150, 162, 208, 200)
     for (cx0, cy, spd, cs) in clouds:
         cx = (cx0 + t * spd) % (W * 1.3) - W * 0.15
         for (dx, dy, r) in [(-0.9, 0.1, 0.8), (0, -0.15, 1.0), (0.9, 0.12, 0.75)]:
             r *= cs
             dr.ellipse([cx + dx * cs - r, cy + dy * cs - r,
-                        cx + dx * cs + r, cy + dy * cs + r],
-                       fill=(255, 255, 255, 235))
+                        cx + dx * cs + r, cy + dy * cs + r], fill=cloud_col)
 
 
 def draw_butterfly(dr, x, y, s, t, ph, col):
@@ -1055,6 +1311,32 @@ def sticker_text(dr, W, txt, cx, cy, size, fill, outline):
             if dx or dy:
                 dr.text((x + dx, y + dy), txt, font=f, fill=outline)
     dr.text((x, y), txt, font=f, fill=fill)
+
+
+def wrap_text(dr, W, txt, cx, cy, size, fill, outline, max_w, fade=1.0):
+    """Sticker text broken onto as many lines as it needs.
+
+    sticker_text draws a single line and will happily run off both edges of
+    a 9:16 frame; verse lines are long enough that they always would.
+    """
+    if size < 6:
+        return
+    f = font(size)
+    words, lines, cur = txt.split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if dr.textlength(trial, font=f) <= max_w or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    lh = size * 1.22
+    y0 = cy - (len(lines) - 1) * lh / 2
+    for i, ln in enumerate(lines):
+        off = (1.0 - fade) * size * 0.5
+        sticker_text(dr, W, ln, cx, y0 + i * lh + off, size, fill, outline)
 
 
 def pop_number(overlay, W, txt, cx, cy, size, fill, outline, rot_deg):
@@ -1186,6 +1468,98 @@ def jump_state(t_jump, s, t):
     return (0.0, 0.0, 0.74 + 0.26 * ease_out_back(p))
 
 
+# Original rhymes. These are WRITTEN FOR THIS CHANNEL, not traditional
+# rhymes, for two reasons: a traditional rhyme's words may be public domain
+# but its familiar TUNE usually is not, and an original rhyme is exactly the
+# "own spin" the inauthentic-content policy asks for.
+#
+# Piper cannot sing. So these are performed as rhythmic spoken verse over a
+# strong melodic bed — the "rhyme time" format, not a song. Do not describe
+# these videos as songs anywhere in the metadata; that would be misleading.
+RHYMES = {
+    "sleepy_stars": dict(
+        title="Five Sleepy Stars",
+        biome="night",
+        lesson="counting down to sleep",
+        lines=["Five little stars up in the sky,",
+               "Blinking slowly, way up high.",
+               "One drifts off and says goodnight,",
+               "Four little stars still shining bright.",
+               "Snuggle down and close your eyes,",
+               "Sleep well under sleepy skies."],
+    ),
+    "rain_song": dict(
+        title="Pitter Patter Rain",
+        biome="garden",
+        lesson="weather words",
+        lines=["Pitter patter, drip drip drop,",
+               "Little raindrops never stop.",
+               "Splash a puddle, one two three,",
+               "Rain is falling on the tree.",
+               "Out comes sunshine, warm and round,",
+               "Flowers waking from the ground."],
+    ),
+    "busy_bees": dict(
+        title="Busy Little Bees",
+        biome="meadow",
+        lesson="counting and buzzing",
+        lines=["Buzzing bees fly round and round,",
+               "Humming softly, what a sound.",
+               "One bee, two bees, three bees more,",
+               "Landing gently by the door.",
+               "Off they go to find a flower,",
+               "Buzzing, buzzing, hour by hour."],
+    ),
+    "snowy_day": dict(
+        title="Soft White Snow",
+        biome="snow",
+        lesson="winter words",
+        lines=["Soft white snow falls all around,",
+               "Landing quietly on the ground.",
+               "Mittens on and hats pulled tight,",
+               "Everything is clean and white.",
+               "Stamp a footprint, one two three,",
+               "Snowy day for you and me."],
+    ),
+    "sea_song": dict(
+        title="Waves Go Up And Down",
+        biome="beach",
+        lesson="up and down",
+        lines=["Waves go up and waves go down,",
+               "Rolling gently to the town.",
+               "Little shells lie in the sand,",
+               "Pick one up with careful hand.",
+               "Splashy water, warm and blue,",
+               "Waves go up and down for you."],
+    ),
+}
+
+
+def build_rhyme(seed, wide):
+    """Each line is one 'count' scene, so the existing stage machinery
+    (entrances, landings, camera, foley) drives the verse for free."""
+    rng = random.Random(seed)
+    key = rng.choice(list(RHYMES))
+    r = RHYMES[key]
+    lines = r["lines"]
+    N = len(lines)
+    kind = rng.choice(list(SPECIES))
+    scenes = [Scene(f"{r['title']}. Say it along with me!", 3.2, "intro")]
+    for i, line in enumerate(lines, 1):
+        scenes.append(Scene(line, 2.6, "count", i))
+    scenes.append(Scene(f"Let's say the last part once more. "
+                        f"{lines[-2]} {lines[-1]}", 4.6, "recap"))
+    scenes.append(Scene("You said it beautifully! See you next time!",
+                        3.2, "outro"))
+    return dict(scenes=scenes, kind=kind, N=N, rhyme_lines=lines,
+                biome=r["biome"], rhyme_key=key,
+                title=r["title"],
+                meta_title=(f"{r['title']} | Original Rhyme for Toddlers | "
+                            f"Calm Rhyme Time"),
+                lesson=r["lesson"],
+                theme=hsv255(rng.random(), 0.60, 0.95))
+
+
 def build_shapes(seed, wide):
     """Shape of the day: five of the same shape in different colours."""
     rng = random.Random(seed)
@@ -1260,6 +1634,13 @@ MODE_TAGS = {
             "toddler learning", "kids learning videos",
             "educational video for toddlers", "preschool letters",
             "kindergarten"],
+    # NB: no "song" tag here. These are spoken rhymes, not sung, and
+    # tagging them as songs would be misleading metadata.
+    "rhyme": ["rhymes for kids", "rhyme time", "toddler rhymes",
+              "original rhyme", "calm rhyme for toddlers",
+              "preschool rhymes", "kids learning videos",
+              "educational video for toddlers", "bedtime rhyme",
+              "quiet time for toddlers", "kindergarten"],
 }
 
 
@@ -1296,12 +1677,17 @@ def produce(mode, seed, fmt, outdir):
 
     rng = random.Random(seed)
     builders = {"counting": build_counting, "colors": build_colors,
-                "shapes": build_shapes, "abc": build_abc}
+                "shapes": build_shapes, "abc": build_abc,
+                "rhyme": build_rhyme}
     spec = builders[mode](seed, wide)
     scenes = spec["scenes"]
     N = spec["N"]
     # Which modes put an animal on stage vs. an inanimate prop.
-    actor_mode = mode in ("counting", "abc")
+    actor_mode = mode in ("counting", "abc", "rhyme")
+    # The setting is picked per video, independently of the lesson, so the
+    # same lesson looks like a different episode each time it comes round.
+    biome = spec.get("biome") or random.Random(seed * 31 + 7).choice(
+        list(BIOMES))
 
     # --- narration first (its real durations define the timeline) ---
     v = Voice()
@@ -1422,7 +1808,7 @@ def produce(mode, seed, fmt, outdir):
             bt += br.uniform(2.2, 4.8)
         blink_sched.append(times)
 
-    bg = build_background(W, H, ground_y, random.Random(seed + 5))
+    bg = build_background(W, H, ground_y, random.Random(seed + 5), biome)
     n_frames = int(duration * FPS)
     enter_t = {sc.n: sc.t for sc in scenes if sc.tag == "count"}
 
@@ -1445,11 +1831,9 @@ def produce(mode, seed, fmt, outdir):
         the ghosts can never drift out of sync with the real drawing.
         """
         si = sizes[i - 1]
-        if mode == "counting":
-            draw_actor(target, spec["kind"], x, y, si, casts[i - 1], tp, pose)
-        elif mode == "abc":
-            # the animals present the letter; they are the same species so
-            # the frame reads as one family, with per-item colour variation
+        if actor_mode:
+            # counting / abc / rhyme all put the same species on stage, with
+            # per-item colour variation so the row reads as one family
             draw_actor(target, spec["kind"], x, y, si, casts[i - 1], tp, pose)
         elif mode == "shapes":
             draw_shape(target, spec["sname"], x, y, si,
@@ -1463,7 +1847,7 @@ def produce(mode, seed, fmt, outdir):
         im = Image.fromarray(bg.copy())
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         dr = ImageDraw.Draw(overlay)
-        draw_sun_clouds(dr, W, H, t, clouds)
+        draw_sun_clouds(dr, W, H, t, clouds, biome)
         for bf in butterflies:
             bx = (bf["cx"] + bf["rx"] * math.sin(t * bf["spd"] * 6.28 + bf["ph"])) * W
             by = (bf["cy"] + bf["ry"] * math.sin(t * bf["spd"] * 12.3 + bf["ph"] * 2)) * H
@@ -1500,8 +1884,21 @@ def produce(mode, seed, fmt, outdir):
                         2 * math.pi * 1.5 * t + phases[i - 1])
             sag = clamp(vy / (s * 26), -0.6, 0.6) if airborne else \
                 0.10 * math.sin(2 * math.pi * 1.5 * t + phases[i - 1])
+            # Limb motion. Airborne: legs tuck up and arms fly out. Grounded:
+            # a slow idle shift of weight so nobody stands frozen.
+            if airborne:
+                leg_lift = clamp(-vy / (s * 16), -1.0, 1.0)
+                arm_swing = clamp(vy / (s * 20), -1.0, 1.0)
+                lean = clamp(vy / (s * 40), -0.35, 0.35)
+            else:
+                idle_ph = 2 * math.pi * 0.45 * t + phases[i - 1]
+                leg_lift = 0.10 * math.sin(idle_ph)
+                arm_swing = 0.22 * math.sin(idle_ph + 0.7)
+                lean = 0.05 * math.sin(idle_ph * 0.6)
             states.append(dict(i=i, x=x, y=rows[i - 1] - h, h=h, vy=vy,
-                               squash=squash, sag=sag, airborne=airborne))
+                               squash=squash, sag=sag, airborne=airborne,
+                               leg_lift=leg_lift, arm_swing=arm_swing,
+                               lean=lean))
 
         # ---- shadows (grounding!) ----
         for st in states:
@@ -1584,7 +1981,8 @@ def produce(mode, seed, fmt, outdir):
                 px = clamp((tgt - st["x"]) / (W * 0.5), -1, 1) * 0.05
             pose = dict(squash=st["squash"], sag=st["sag"], blink=blink,
                         mouth=mouth, wave=wave_amt, brow=brow,
-                        pupil=(px, py))
+                        pupil=(px, py), leg_lift=st["leg_lift"],
+                        arm_swing=st["arm_swing"], lean=st["lean"])
             draw_subject(dr, i, st["x"], rows[i - 1] - st["h"], pose, t)
 
         # big number / word pop on each count beat (with a wobble)
@@ -1601,6 +1999,14 @@ def produce(mode, seed, fmt, outdir):
             if mode == "counting":
                 pop_number(overlay, W, str(cur.n), W * 0.5, ly,
                            int(320 * k * p), (255, 255, 255), dark_theme, wob)
+            elif mode == "rhyme":
+                # the verse line itself, wrapped, so a parent can read along
+                line = spec["rhyme_lines"][cur.n - 1]
+                fade = min(1.0, (t - cur.t) / 0.35)
+                wrap_text(dr, W, line, W * 0.5,
+                          H * (0.15 if wide else 0.24),
+                          int(56 * k), (255, 255, 255), dark_theme,
+                          max_w=W * 0.86, fade=fade)
             elif mode == "abc":
                 # the letter itself is the lesson: draw it huge and coloured,
                 # with the word underneath
@@ -1719,7 +2125,8 @@ def produce(mode, seed, fmt, outdir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="random",
-                    choices=["random", "counting", "colors", "shapes", "abc"])
+                    choices=["random", "counting", "colors", "shapes",
+                             "abc", "rhyme", "story"])
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--count", type=int, default=1)
     ap.add_argument("--format", default="shorts", choices=["shorts", "wide"])
@@ -1733,11 +2140,18 @@ def main():
     if shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg not found on PATH")
     seed = args.seed if args.seed is not None else random.randrange(1, 10 ** 6)
+    # story lives in its own module (it needs a staging system the lesson
+    # modes do not have) but shares the CLI so daily_run treats it the same
+    all_modes = list(MODE_TAGS) + ["story"]
     for i in range(args.count):
         mode = args.mode if args.mode != "random" \
-            else random.Random(seed).choice(list(MODE_TAGS))
+            else random.Random(seed).choice(all_modes)
         print(f"[{i + 1}/{args.count}] building {mode} (seed {seed})")
-        produce(mode, seed, args.format, args.outdir)
+        if mode == "story":
+            import story_mode
+            story_mode.produce_story(seed, args.format, args.outdir)
+        else:
+            produce(mode, seed, args.format, args.outdir)
         seed += 1 + random.randrange(40)
 
 

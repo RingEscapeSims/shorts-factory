@@ -96,13 +96,49 @@ Never ship a change without viewing frames at intro / mid / recap / outro.
 
 ## Content formats that exist now
 
-| Mode | What it teaches | Variants possible |
-|---|---|---|
-| `counting` | numbers 1-5 (1-10 wide) | 5 species x palettes |
-| `colors` | one colour, five props | 6 colours |
-| `shapes` | one shape, five colours | 6 shapes |
-| `abc` | one letter, sound, 3 words | **26 letters** |
-| long-form | `make_long.py` shuffles the above | non-repeating order |
+| Mode | What it teaches | Variants | Where |
+|---|---|---|---|
+| `counting` | numbers 1-5 (1-10 wide) | 5 species | kids_studio |
+| `colors` | one colour, five props | 6 colours | kids_studio |
+| `shapes` | one shape, five colours | 6 shapes | kids_studio |
+| `abc` | one letter, sound, 3 words | **26 letters** | kids_studio |
+| `rhyme` | original spoken verse | 5 rhymes | kids_studio |
+| `story` | one social idea, staged | 5 stories | **story_mode.py** |
+| long-form | shuffles all of the above | — | make_long.py |
+
+Roughly 48 distinct lesson subjects x 7 biomes. Every video also picks its
+setting independently of its lesson, so the same lesson looks like a
+different episode each time it comes round.
+
+## Environments (the fix for "it all looks the same")
+
+`BIOMES` holds seven settings: meadow, beach, forest, night, farm, snow,
+garden. Each changes sky gradient, ground colours, skyline silhouettes,
+scatter props and whether there is a sun or a moon. Two rules:
+
+- Skyline elements anchor to `hz` (the horizon), NOT `ground_y`. The front
+  hill ellipse is drawn afterwards and rises to ~`ground_y - 0.06H`, so
+  anything placed at `ground_y` gets buried by it.
+- `draw_sun_clouds` takes the biome: night gets a crescent moon and dim
+  blue clouds instead of a sun.
+
+## Characters
+
+`draw_actor` builds a jointed figure, not a blob with stuck-on circles:
+tail, then legs (hip->knee->ankle via `LIMB`), body, arms
+(shoulder->elbow->hand), head, face. `LIMB` strokes the ink pass wide and
+the fill pass narrow, which is what gives limbs a clean cel outline that
+follows the joint.
+
+Pose keys: `squash`, `sag`, `blink`, `mouth`, `wave`, `brow`, `pupil`,
+`leg_lift`, `arm_swing`, `lean`. `lean` shears the whole figure about the
+feet inside `P()`, so **every ellipse must be positioned from its centre
+via `_box()`** — taking `P()` of two opposite corners shears them by
+different amounts and squashes the shape.
+
+The body sits high enough that a length of leg shows below it. If you
+change body/head y, move the face features, cheeks, mouth and species
+toppers by the same amount or the face slides off.
 
 `make_long.py` renders N segments (different mode + seed each) and joins
 them with ffmpeg `xfade`/`acrossfade`, adding title and goodbye cards and
@@ -145,6 +181,15 @@ is where watch-time lives; keep the running order non-repeating
 - Anything positioned relative to a character must account for its jump
   height (`st["h"]`), not just its ground row — the recap numbers landed on
   top of the jumping characters' faces until this was fixed.
+- **The Made-for-Kids check in `upload_youtube.py` is inverted on purpose.**
+  It lists the ONE general-audience engine (`escape_`, the rings engine)
+  and treats everything else as child-directed. A whitelist of kids
+  prefixes rotted twice — a new mode shipped, its prefix was not added, and
+  those videos would have uploaded as general audience. Do not "tidy" this
+  back into a kids whitelist. A forgotten new mode must fail closed.
+- Rhymes here are ORIGINAL and SPOKEN. Piper cannot sing. Never tag or
+  describe them as songs, and never set a traditional rhyme to its familiar
+  tune — the words may be public domain but the tune usually is not.
 
 ## Known rough edges you may be asked to fix
 

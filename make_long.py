@@ -144,13 +144,23 @@ LESSON_LABEL = {
     "colors": "Colours",
     "shapes": "Shapes",
     "abc": "The Alphabet",
+    "rhyme": "Rhyme Time",
+    "story": "A Little Story",
 }
+
+
+def render_segment(mode, seed, workdir):
+    """Story lives in its own module; everything else is a lesson mode."""
+    if mode == "story":
+        import story_mode
+        return story_mode.produce_story(seed, "wide", str(workdir))
+    return ks.produce(mode, seed, "wide", str(workdir))
 
 
 def plan_segments(seed, n_segments):
     """Pick a varied, non-repeating running order for this episode."""
     rng = random.Random(seed)
-    modes = list(LESSON_LABEL)
+    modes = list(LESSON_LABEL)          # includes rhyme and story
     rng.shuffle(modes)
     order = []
     while len(order) < n_segments:
@@ -202,8 +212,7 @@ def main():
 
         for i, (mode, sseed) in enumerate(plan, 1):
             print(f"  [{i}/{n_seg}] {mode} (seed {sseed})")
-            mp4 = ks.produce(mode, sseed, "wide", str(work))
-            parts.append(Path(mp4))
+            parts.append(Path(render_segment(mode, sseed, work)))
 
         bye = work / "99_bye.mp4"
         make_card(bye, W, H, "Great Job!", "See you next time, friends!",
@@ -248,7 +257,7 @@ def main():
         )
         tags = []
         for m, _ in plan:
-            for tg in ks.MODE_TAGS[m][:4]:
+            for tg in ks.MODE_TAGS.get(m, ["kids stories"])[:4]:
                 if tg not in tags:
                     tags.append(tg)
         tags = (tags + ["learning video for toddlers", "preschool learning",

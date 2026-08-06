@@ -107,43 +107,51 @@ def get_service():
     return build("youtube", "v3", credentials=creds)
 
 
-# Everything the kids engines emit is child-directed, so uploading it
-# WITHOUT selfDeclaredMadeForKids=true would be a COPPA violation. Refuse
-# rather than fall back to the generic default.
+# This check is deliberately INVERTED: rather than listing the kids
+# engines, it lists the only general-audience one. Everything else is
+# assumed child-directed and must declare selfDeclaredMadeForKids=true.
 #
-# KEEP IN SYNC with kids_studio.MODE_TAGS and make_long.py. Adding a mode
-# without adding it here silently reopens the hole: a new "rhyme_" video
-# with a missing sidecar would upload as general-audience.
-KIDS_PREFIXES = ("counting_", "colors_", "shapes_", "abc_", "long_")
-KIDS_MODES = {"counting", "colors", "shapes", "abc", "long"}
+# The whitelist version rotted twice — a new lesson mode shipped, its
+# prefix was not added here, and those videos would have gone up as general
+# audience. Failing safe means a new mode I forget about gets REFUSED
+# (annoying, obvious, fixable) instead of mislabelled (a COPPA problem).
+GENERAL_PREFIXES = ("escape_",)          # generate_short.py, the rings engine
+GENERAL_MODES = {"rings", "escape"}
+
+
+def _is_general_audience(name, meta):
+    if meta is not None and meta.get("mode") in GENERAL_MODES:
+        return True
+    return name.startswith(GENERAL_PREFIXES)
 
 
 def load_meta(mp4_path):
     jpath = os.path.splitext(mp4_path)[0] + ".json"
     name = os.path.splitext(os.path.basename(mp4_path))[0]
 
-    if os.path.getsize(mp4_path) < 1024:
-        sys.exit(f"REFUSING to upload {name}: the file is {os.path.getsize(mp4_path)} "
-                 "bytes, which means the render was interrupted. Delete it "
-                 "and re-render.")
+    size = os.path.getsize(mp4_path)
+    if size < 1024:
+        sys.exit(f"REFUSING to upload {name}: the file is {size} bytes, "
+                 "which means the render was interrupted. Delete it and "
+                 "re-render.")
 
     if os.path.exists(jpath):
         with open(jpath) as fh:
             meta = json.load(fh)
-        # Two independent signals that this is a kids video: the filename
-        # and the mode recorded in the sidecar. Either one is enough.
-        is_kids = (name.startswith(KIDS_PREFIXES)
-                   or meta.get("mode") in KIDS_MODES)
-        if is_kids and not meta.get("selfDeclaredMadeForKids"):
-            sys.exit(f"REFUSING to upload {name}: it came from the kids "
-                     "engine but its metadata does not declare "
-                     "selfDeclaredMadeForKids=true (COPPA requirement).")
+        if not _is_general_audience(name, meta) \
+                and not meta.get("selfDeclaredMadeForKids"):
+            sys.exit(f"REFUSING to upload {name}: it is not from the "
+                     "general-audience rings engine, so it is treated as "
+                     "child-directed, but its metadata does not declare "
+                     "selfDeclaredMadeForKids=true (COPPA requirement). If "
+                     "it really is general-audience, add its prefix to "
+                     "GENERAL_PREFIXES.")
         return meta
 
-    if name.startswith(KIDS_PREFIXES):
+    if not _is_general_audience(name, None):
         sys.exit(f"REFUSING to upload {name}: metadata sidecar {jpath} is "
                  "missing, and guessing the Made-for-Kids flag on a "
-                 "child-directed video is not safe. Re-render it.")
+                 "possibly child-directed video is not safe. Re-render it.")
     return dict(title=name, description="#shorts", tags=["shorts"],
                 categoryId="24", privacyStatus="public",
                 selfDeclaredMadeForKids=False)
