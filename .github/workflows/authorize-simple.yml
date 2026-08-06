@@ -1,0 +1,97 @@
+# Authorize the kids channel WITHOUT opening the Google Cloud console.
+#
+# Reuses the OAuth client already stored in CLIENT_SECRET_JSON (the one the
+# rings channel uses). An OAuth client identifies the app, not the user, so
+# the same client can be approved by a different Google account.
+#
+# Run it twice:
+#   step = link      -> prints a link; approve on your phone, copy the code
+#   step = exchange  -> paste the code; saves YT_REFRESH_TOKEN for you
+name: Authorize kids channel (simple)
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "Run 'link' first, then 'exchange' with the code"
+        default: "link"
+        type: choice
+        options: [link, exchange]
+      code:
+        description: "Only for 'exchange': the code from the address bar"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the rings client secret is present
+        env:
+          CS: ${{ secrets.CLIENT_SECRET_JSON }}
+        run: |
+          if [ -z "$CS" ]; then
+            echo "::error::CLIENT_SECRET_JSON is not set. That secret holds"
+            echo "::error::the OAuth client from your rings setup. Without"
+            echo "::error::it this shortcut cannot work — use the"
+            echo "::error::'Authorize YouTube (one time)' workflow instead."
+            exit 1
+          fi
+          echo "Found the rings OAuth client."
+
+      - name: Print the authorization link
+        if: ${{ github.event.inputs.step == 'link' }}
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+        run: python tools/simple_auth.py link
+
+      - name: Exchange the code for a refresh token
+        id: ex
+        if: ${{ github.event.inputs.step == 'exchange' }}
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+        run: |
+          python tools/simple_auth.py exchange \
+            --code "${{ github.event.inputs.code }}"
+
+      - name: Save the refresh token as a secret
+        if: ${{ github.event.inputs.step == 'exchange' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          RT: ${{ steps.ex.outputs.refresh_token }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::GH_PAT is not set, so I cannot save the token."
+            echo "::error::This repo is PUBLIC, so the token must never be"
+            echo "::error::printed to a log. Add a fine-grained token with"
+            echo "::error::Secrets: Read and write, then re-run 'exchange'."
+            exit 1
+          fi
+          [ -z "$RT" ] && { echo "::error::no token produced"; exit 1; }
+          printf '%s' "$RT" | gh secret set YT_REFRESH_TOKEN \
+            --repo "${{ github.repository }}" --body -
+          echo "Saved YT_REFRESH_TOKEN."
+          echo
+          echo "NEXT: run 'Kids long-form video' with count=1 and"
+          echo "privacy=unlisted, then check YouTube Studio that it landed"
+          echo "on the KIDS channel and says 'made for kids'."
+
+      - name: Quota warning
+        if: ${{ github.event.inputs.step == 'exchange' }}
+        run: |
+          echo "::warning::This reuses the rings Google Cloud project, so"
+          echo "::warning::both channels share one 10,000 unit/day quota."
+          echo "::warning::1 rings + 5 kids uploads = 9,600 units. It fits,"
+          echo "::warning::but a single retry will exceed it. If uploads"
+          echo "::warning::start failing with quotaExceeded, make a separate"
+          echo "::warning::Cloud project for the kids channel."
