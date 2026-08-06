@@ -1,6 +1,7 @@
 # --- credentials: NEVER commit these -------------------------------------
 client_secret.json
 token.json
+token.json.bak
 *.pem
 .env
 
@@ -13,12 +14,17 @@ queue/
 published/
 test/
 out/
+shorts_factory/
 *.mp4
 *.wav
 *.png
+escape_*.json
 
 # --- python --------------------------------------------------------------
 __pycache__/
 *.pyc
 .venv/
 venv/
+
+# --- tooling -------------------------------------------------------------
+.claude/
