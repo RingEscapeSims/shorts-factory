@@ -1,10 +1,38 @@
 # Phone-only setup — from zero to automatic uploads
 
 Everything below is done in a mobile browser. Your PC stays off.
-Budget about 20 minutes. Do the steps in order.
-
 **Use Chrome (or any real browser), not the GitHub mobile app** — the app
 cannot add repository secrets.
+
+---
+
+## Where things already stand
+
+The repo `RingEscapeSims/shorts-factory` is already live:
+
+- **`daily.yml`** runs the **rings** engine at 13:00 and 22:00 UTC, using
+  the existing `CLIENT_SECRET_JSON` and `TOKEN_JSON` secrets. It has been
+  uploading since 5 Aug. **Nothing about it was changed.**
+- **`kids-daily.yml`** is the new kids workflow, at 03:30 and 12:30 UTC
+  (09:00 / 18:00 IST). It is not yet authorized.
+
+So Steps 1 and 2 below are already done for the rings channel. What you
+still have to decide is **which channel the kids videos publish to.**
+
+### The channel decision (do this first)
+
+**Option A — separate kids channel (recommended).** Kids content on its own
+channel, as the project rules require. Made-for-Kids disables comments and
+personalised ads on whatever channel it lands on, and mixing cartoon
+counting videos with neon physics Shorts confuses both the algorithm and
+the audience. Cost: do Steps 0 and 2–4 below to get a second credential.
+
+**Option B — reuse the rings channel.** Zero setup: `kids-daily.yml`
+already falls back to `TOKEN_JSON` and will publish there, printing a
+warning when it does. Fast, but you inherit the problems above.
+
+If you pick A, carry on. If you pick B, skip to Step 5 and just run the
+workflow.
 
 ---
 
@@ -18,16 +46,11 @@ personalised ads on the whole channel.
 
 ---
 
-## Step 1 — Put this folder on GitHub
+## Step 1 — GitHub repo — ALREADY DONE
 
-Make the repository **private**. On a private repo you get 2,000 free
-Actions minutes a month, which is enough for ~2 videos a day. Public repos
-get unlimited minutes but expose the code (that is fine too — your call).
-
-If you have never pushed this folder before, the easiest phone route is
-github.com -> New repository -> then upload the files through the web
-"Add file -> Upload files" button. `.gitignore` already keeps credentials,
-the 114 MB voice model, and rendered videos out of the repo.
+`RingEscapeSims/shorts-factory`, private, code already pushed.
+`.gitignore` keeps credentials, the 114 MB voice model, and rendered
+videos out of the repo.
 
 ---
 
@@ -66,6 +89,10 @@ repository secret**. Add these exactly:
 | `YT_CLIENT_ID` | the Client ID from Step 2 |
 | `YT_CLIENT_SECRET` | the Client secret from Step 2 |
 | `GH_PAT` | a GitHub token — see below |
+
+> Do **not** touch the existing `CLIENT_SECRET_JSON` and `TOKEN_JSON`
+> secrets. Those belong to the rings workflow and it will stop uploading
+> if you change them.
 
 For `GH_PAT`: github.com -> Settings -> Developer settings -> Personal access
 tokens -> **Fine-grained tokens** -> Generate new token. Give it access to
