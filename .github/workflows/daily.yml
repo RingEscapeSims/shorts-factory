@@ -2,10 +2,11 @@ name: shorts-factory
 
 on:
   schedule:
-    # 13:00 & 22:00 UTC = 9:00 AM & 6:00 PM US Eastern (summer).
-    # GitHub may delay these by a few minutes — that's fine, looks natural.
-    - cron: '0 13 * * *'
-    - cron: '0 22 * * *'
+    # 13:23 & 22:17 UTC ~= 9:20 AM & 6:15 PM US Eastern (summer).
+    # Deliberately off the top of the hour: GitHub's shared scheduler is most
+    # congested at :00, and scheduled runs queue behind that spike.
+    - cron: '23 13 * * *'
+    - cron: '17 22 * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -46,6 +47,9 @@ jobs:
         run: python daily_run.py --count 1
 
       - name: Log the run (keeps scheduled workflows from being auto-disabled)
+        # Bookkeeping only. It must never fail the job: a red run here would
+        # trigger the retry workflow and republish a video already uploaded.
+        continue-on-error: true
         run: |
           git config user.name "shorts-factory-bot"
           git config user.email "actions@users.noreply.github.com"
