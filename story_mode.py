@@ -559,8 +559,8 @@ def produce_story(seed, fmt, outdir, which=None):
         title=meta_title[:100],
         description=(
             f"{meta_title}\n\n"
-            f"A gentle little story about {spec['lesson']}, told slowly and "
-            "calmly for preschoolers.\n\n"
+            f"Welcome to {ks.CHANNEL_NAME}! A gentle little story about "
+            f"{spec['lesson']}, told slowly and calmly for preschoolers.\n\n"
             f"{spec['moral']}\n\n"
             "Everything here is original: the characters are drawn by our "
             "own animation engine, the music is composed and synthesised "

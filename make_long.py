@@ -243,9 +243,9 @@ def main():
                  f"{mins} Minute{'s' if mins != 1 else ''} of Calm Learning")
         desc = (
             f"{title}\n\n"
-            "A gentle, screen-calm learning video for preschoolers. We take "
-            "our time with each lesson so little ones can join in and answer "
-            "out loud.\n\n"
+            f"Welcome to {ks.CHANNEL_NAME}! A gentle, screen-calm learning "
+            "video for preschoolers. We take our time with each lesson so "
+            "little ones can join in and answer out loud.\n\n"
             "In this episode:\n" + "\n".join(marks) + "\n\n"
             "Everything here is original: characters drawn by our own "
             "animation engine, music composed and synthesised for this "

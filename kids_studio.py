@@ -1644,6 +1644,11 @@ MODE_TAGS = {
 }
 
 
+# The channel's own name, used in descriptions. Change it here once and
+# every mode picks it up; nothing needs re-rendering.
+CHANNEL_NAME = "Cloudtop Kids"
+
+
 def build_description(spec, mode, seed):
     """Honest description: says what the video teaches and how it was made.
 
@@ -1653,16 +1658,17 @@ def build_description(spec, mode, seed):
     """
     return (
         f"{spec['meta_title']}\n\n"
-        f"In this video we learn {spec['lesson']} together, slowly and "
-        "calmly, with plenty of time for little ones to join in and answer "
-        "out loud.\n\n"
+        f"Welcome to {CHANNEL_NAME}! In this video we learn "
+        f"{spec['lesson']} together, slowly and calmly, with plenty of time "
+        "for little ones to join in and answer out loud.\n\n"
         "Everything here is original: the characters are drawn by our own "
         "animation engine, the music is composed and synthesised for this "
         "video, and the narration is recorded fresh. No third-party clips, "
         "no borrowed songs, no copied characters.\n\n"
-        "For parents and teachers: this channel makes gentle, screen-calm "
-        "learning videos for preschoolers — numbers, colours, shapes and "
-        "the alphabet. No loud noises, no flashing, no scary surprises.\n\n"
+        f"For parents and teachers: {CHANNEL_NAME} makes gentle, "
+        "screen-calm learning videos for preschoolers — numbers, colours, "
+        "shapes, the alphabet, rhymes and little stories. No loud noises, "
+        "no flashing, no scary surprises.\n\n"
         f"Episode #{seed}\n\n"
         "#kidslearning #toddlers #preschool"
     )
