@@ -1,0 +1,24 @@
+# --- credentials: NEVER commit these -------------------------------------
+client_secret.json
+token.json
+*.pem
+.env
+
+# --- large model files (GitHub rejects >100 MB; CI downloads these) -------
+voices/*.onnx
+voices/*.onnx.json
+
+# --- generated media -----------------------------------------------------
+queue/
+published/
+test/
+out/
+*.mp4
+*.wav
+*.png
+
+# --- python --------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/

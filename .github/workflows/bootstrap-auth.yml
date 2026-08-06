@@ -1,0 +1,100 @@
+# Run this ONCE, by hand, from the GitHub mobile site or app.
+# It prints a short code; you approve it on your phone at google.com/device.
+# The resulting refresh token is written straight into the repo secret
+# YT_REFRESH_TOKEN — it is never printed into the build log.
+name: Authorize YouTube (one time)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check required secrets are present
+        env:
+          CID: ${{ secrets.YT_CLIENT_ID }}
+          CSEC: ${{ secrets.YT_CLIENT_SECRET }}
+          PAT: ${{ secrets.GH_PAT }}
+        run: |
+          missing=""
+          [ -z "$CID"  ] && missing="$missing YT_CLIENT_ID"
+          [ -z "$CSEC" ] && missing="$missing YT_CLIENT_SECRET"
+          [ -z "$PAT"  ] && missing="$missing GH_PAT"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            echo "See SETUP_PHONE.md for how to get each one."
+            exit 1
+          fi
+          echo "All three secrets are present."
+
+      - name: Start device authorization
+        id: auth
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+        run: |
+          echo "Watch this log. A code appears within a few seconds."
+          echo "You have ~30 minutes to approve it on your phone."
+          python tools/device_auth.py
+
+      - name: Verify the token can mint an access token
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ steps.auth.outputs.refresh_token }}
+        run: |
+          pip install --quiet google-auth
+          python - <<'PY'
+          import os
+          from google.oauth2.credentials import Credentials
+          from google.auth.transport.requests import Request
+          c = Credentials(
+              token=None,
+              refresh_token=os.environ["YT_REFRESH_TOKEN"],
+              client_id=os.environ["YT_CLIENT_ID"],
+              client_secret=os.environ["YT_CLIENT_SECRET"],
+              token_uri="https://oauth2.googleapis.com/token",
+              scopes=["https://www.googleapis.com/auth/youtube.upload"],
+          )
+          c.refresh(Request())
+          assert c.token, "no access token returned"
+          print("Refresh token works.")
+          PY
+
+      - name: Save refresh token as a repository secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          RT: ${{ steps.auth.outputs.refresh_token }}
+        run: |
+          if [ -z "$RT" ]; then
+            echo "::error::No refresh token was produced."
+            exit 1
+          fi
+          printf '%s' "$RT" | gh secret set YT_REFRESH_TOKEN \
+            --repo "${{ github.repository }}" --body -
+          echo "Secret YT_REFRESH_TOKEN saved."
+
+      - name: What to do next
+        run: |
+          echo "Authorization complete."
+          echo
+          echo "The token is scoped to UPLOAD ONLY - it cannot read, edit or"
+          echo "delete anything on your channel."
+          echo
+          echo "NEXT: run the 'Daily kids videos' workflow manually with"
+          echo "privacy = unlisted, then open YouTube Studio on your phone and"
+          echo "confirm (a) the video landed on the KIDS channel, not your"
+          echo "main one, and (b) it is labelled 'Yes, it's made for kids'."
+          echo "Only switch the schedule to public after that check passes."

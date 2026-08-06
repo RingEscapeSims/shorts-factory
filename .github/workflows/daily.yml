@@ -1,0 +1,127 @@
+# Renders kids videos in the cloud and uploads them. No PC required.
+#
+# Cron is ALWAYS UTC. The two times below are 09:00 and 18:00 India time
+# (UTC+5:30). If you are not in India, change them:
+#     your_local_hour - your_utc_offset = the hour to write here
+name: Daily kids videos
+
+on:
+  schedule:
+    - cron: "30 3 * * *"     # 09:00 IST
+    - cron: "30 12 * * *"    # 18:00 IST
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "How many videos to make"
+        default: "1"
+        type: string
+      privacy:
+        description: "Privacy for this run"
+        default: "unlisted"
+        type: choice
+        options: [unlisted, public, private]
+      supersample:
+        description: "2 = ship quality, 1 = ~4x faster draft"
+        default: "2"
+        type: choice
+        options: ["2", "1"]
+
+# Never let two runs upload at the same time.
+concurrency:
+  group: kids-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: write          # to append the upload log (also keeps cron alive)
+
+jobs:
+  render-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg and a friendly font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-comic-neue fonts-dejavu-core
+          ffmpeg -version | head -1
+          fc-list | grep -i "comic" || echo "note: Comic Neue not found, will use DejaVu"
+
+      - name: Install Python packages
+        run: pip install --quiet -r requirements.txt
+
+      # The voice model is ~114 MB, over GitHub's 100 MB file limit, so it is
+      # never committed. Cache it so it downloads once, not twice a day.
+      - name: Restore cached voice model
+        id: voice-cache
+        uses: actions/cache@v4
+        with:
+          path: voices
+          key: piper-en_US-ljspeech-high-v1
+
+      - name: Download voice model (first run only)
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        run: |
+          python kids_studio.py --setup-voice
+          ls -lh voices/
+
+      - name: Render and upload
+        env:
+          CI: "true"
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          KIDS_SS: ${{ github.event.inputs.supersample || '2' }}
+        run: |
+          COUNT="${{ github.event.inputs.count || '1' }}"
+          PRIVACY="${{ github.event.inputs.privacy || '' }}"
+
+          mkdir -p queue published
+          for i in $(seq 1 "$COUNT"); do
+            SEED=$((RANDOM * 32768 + RANDOM))
+            echo "::group::Rendering video $i/$COUNT (seed $SEED)"
+            python kids_studio.py --mode random --seed "$SEED" \
+              --count 1 --outdir queue
+            echo "::endgroup::"
+          done
+
+          ARGS="--dir queue --archive published"
+          if [ -n "$PRIVACY" ]; then ARGS="$ARGS --privacy $PRIVACY"; fi
+          python upload_youtube.py $ARGS | tee upload_out.txt
+
+      - name: Record what was published
+        if: success()
+        run: |
+          STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          grep -o 'https://youtube.com/shorts/[A-Za-z0-9_-]*' upload_out.txt \
+            | while read -r url; do
+                echo "$STAMP  $url" >> uploads.log
+              done
+          if [ -z "$(git status --porcelain uploads.log)" ]; then
+            echo "Nothing new to log."
+            exit 0
+          fi
+          git config user.name  "shorts-factory-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uploads.log
+          git commit -m "log: uploads $STAMP"
+          # Committing also counts as repository activity, which stops GitHub
+          # from auto-disabling the cron after 60 idle days.
+          git push
+
+      - name: Keep the rendered files if something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-run-${{ github.run_id }}
+          path: |
+            queue/
+            upload_out.txt
+          retention-days: 7
+          if-no-files-found: ignore

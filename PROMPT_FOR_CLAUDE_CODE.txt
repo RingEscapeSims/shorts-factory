@@ -1,0 +1,22 @@
+Extract shorts_factory_v2.zip from my Downloads into a folder called
+shorts_factory and work inside it. Read CLAUDE.md first and follow its
+compliance rules exactly.
+
+Then:
+1. Run autopilot.py and execute every step for me (install packages, ffmpeg,
+   test render). Fix any errors yourself.
+2. Set up the natural voice: pip install piper-tts, then
+   python kids_studio.py --setup-voice. Verify the voice's MODEL_CARD
+   license allows commercial use. Re-render the counting seed 7 sample with
+   the new voice and let me hear/see it.
+3. Walk me through the Google Cloud pages when the browser opens (I will do
+   the clicks on my own Google account), then do the first upload as
+   unlisted and confirm in YouTube Studio that it is marked Made for Kids.
+4. Register the schedule: 2 kids videos per day (09:00 and 18:00).
+5. After everything works, build ONE new template from the growth backlog in
+   CLAUDE.md (shapes), following the design system, render seed 7 and 8,
+   and show me 4 frames from each before adding it to the daily rotation.
+
+Rules: never add trademarked characters, never flip selfDeclaredMadeForKids
+to false, keep everything free and local, and show me visual proof (frames)
+after each render.
