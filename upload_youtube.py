@@ -69,24 +69,34 @@ def _creds_from_env():
 
 
 def get_service():
+    """Three auth paths, tried in order:
+
+    1. YT_CLIENT_ID/SECRET/REFRESH_TOKEN env vars  (headless, no files)
+    2. token.json on disk  (what the original workflow writes from the
+       TOKEN_JSON secret — still fully supported, do not break it)
+    3. interactive browser flow  (local machines only)
+    """
     creds = _creds_from_env()
     if creds is not None:
         print("auth: refresh token from environment (headless)")
         return build("youtube", "v3", credentials=creds)
 
-    if os.environ.get("CI"):
-        sys.exit(
-            "Running in CI but YT_CLIENT_ID / YT_CLIENT_SECRET / "
-            "YT_REFRESH_TOKEN are not all set. Run the 'Authorize YouTube "
-            "(one time)' workflow first — see SETUP_PHONE.md.")
-
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        print("auth: token.json")
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            # No usable cached token. A browser flow is impossible on a
+            # CI runner, so fail with a message that names both fixes.
+            if os.environ.get("CI"):
+                sys.exit(
+                    "No usable credentials in CI. Provide EITHER "
+                    "YT_CLIENT_ID + YT_CLIENT_SECRET + YT_REFRESH_TOKEN as "
+                    "env vars (see SETUP_PHONE.md), OR a valid token.json "
+                    "written from the TOKEN_JSON secret.")
             if not os.path.exists(CLIENT_SECRET):
                 sys.exit(f"client_secret.json not found in {HERE} — "
                          "follow the setup steps in README.md")
