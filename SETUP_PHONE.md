@@ -11,11 +11,15 @@ cannot add repository secrets.
 The repo `RingEscapeSims/shorts-factory` is already live and runs **three**
 workflows:
 
-| Workflow | Engine | Schedule (UTC) | Credentials |
+| Workflow | Output | Schedule (UTC) | Credentials |
 |---|---|---|---|
-| `daily.yml` | rings | 13:00, 22:00 | `CLIENT_SECRET_JSON` + `TOKEN_JSON` |
-| `kids-daily.yml` | kids Shorts | 03:30, 12:30 | `YT_*` (see below) |
-| `kids-long.yml` | kids long-form | 01:00 Mon/Wed/Fri | `YT_*` (see below) |
+| `daily.yml` | rings Shorts | 13:23, 22:17 | `CLIENT_SECRET_JSON` + `TOKEN_JSON` |
+| `kids-daily.yml` | **2 kids Shorts/day** | 03:38, 12:41 | `YT_*` (see below) |
+| `kids-long.yml` | **3 kids long videos/day** | 00:47 | `YT_*` (see below) |
+
+That is **5 kids uploads a day**, all different: each picks its lesson
+mode and its setting independently, and the three long videos use distinct
+seeds derived from the date plus the slot number, so no two coincide.
 
 The rings workflow has been uploading since 5 Aug and **nothing about it
 was changed**. Do not touch `CLIENT_SECRET_JSON` or `TOKEN_JSON`.
@@ -148,35 +152,43 @@ Scheduled runs use the privacy from the video's metadata, which is
 
 ---
 
-## What it costs — read this before raising the volume
+## What it costs — THE REPO MUST BE PUBLIC AT THIS VOLUME
 
-Free, but the compute ceiling is real and long-form blows through it.
-
-A long video is just N Shorts glued together, so it costs N times as much
-to render. On a 2-core GitHub runner, one 28-second segment at
-supersample 2 takes roughly 8–12 minutes:
+A long video is N Shorts glued together, so it costs N times as much to
+render. On a 2-core GitHub runner one 28-second segment at supersample 2
+takes roughly 8–12 minutes:
 
 | Output | Runner minutes each | Per month |
 |---|---|---|
 | 1 Short | 8–12 | 2/day = ~600 |
-| 4-minute long-form (7 segments) | 60–85 | 3/week = ~900 |
-| 6-minute long-form (12 segments) | 100–140 | **daily = ~3,600** |
+| 4-minute long video (7 segments) | 60–85 | 3/day = ~5,700 |
 
-**A private repo gets 2,000 free minutes/month.** The default schedule
-(2 Shorts daily + one 4-minute long-form on Mon/Wed/Fri) lands around
-1,500 — inside the budget with a little headroom. **Daily long-form does
-not fit.** If you want it, pick one:
+**Total for the current schedule: about 6,200 runner-minutes a month.**
+A private repo gets **2,000 free**, so it would stop around day 10.
 
-1. **Make the repo public** — Actions minutes become unlimited and free.
-   There are no credentials in the code; `.gitignore` keeps them out.
-   This is the simplest fix.
-2. **Set `supersample` to 1** — about 4x faster, slightly jaggier outlines.
-3. **Move rendering off GitHub** to a free always-on VM (Oracle Cloud's
-   ARM free tier). Best long-term answer, and it sidesteps the Actions
-   acceptable-use question entirely. The scripts run there unchanged.
+Three ways to fix it, in the order I would try them:
 
-- **YouTube API quota**: 10,000 units/day, each upload costs 1,600 —
-  **6 uploads/day is a hard ceiling** no matter what you do.
+1. **Make the repo public.** Actions minutes become unlimited and free.
+   There are no credentials in the code — `.gitignore` keeps
+   `client_secret.json`, `token.json` and the voice model out. This is one
+   toggle in Settings and it solves the whole problem.
+2. **Move rendering to a free always-on VM.** Oracle Cloud's ARM free tier
+   is genuinely free and gives you 4 cores, which is faster than a GitHub
+   runner anyway. The scripts run there unchanged — same three environment
+   variables, driven by cron. This is the best long-term answer and it
+   sidesteps the acceptable-use question below entirely.
+3. **Cut the cost of the work**: fewer long videos, shorter ones
+   (`minutes: 3`), or `supersample: 1` (~4x faster, slightly jaggier).
+
+> **Acceptable use.** GitHub restricts Actions to work related to the
+> repository's own software project. Two short renders a day is arguable;
+> **~3.5 hours of video rendering a day is not**, and the penalty is
+> account-level, not repo-level. If you are keeping this volume, plan to
+> move to option 2 rather than leaving it on Actions indefinitely.
+
+- **YouTube API quota**: 10,000 units/day, each upload costs 1,600. Five
+  uploads is 8,000 — it fits, but **6/day is the hard ceiling**. Do not
+  raise the count past 6 without requesting a quota increase.
 
 ---
 

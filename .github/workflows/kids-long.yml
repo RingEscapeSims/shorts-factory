@@ -1,29 +1,34 @@
-# Builds ONE long-form (16:9) kids video and uploads it.
+# Builds THREE long-form (16:9) kids videos a day and uploads them.
 #
-# COST WARNING — read before raising the frequency.
-# A long video is N short renders glued together. On a 2-core GitHub runner
-# a 28-second segment at supersample=2 takes roughly 8-12 minutes, so:
-#     4 minutes of video  ~=  7 segments   ~=  60-85 runner-minutes
-#     6 minutes of video  ~= 12 segments   ~= 100-140 runner-minutes
-# A PRIVATE repo has 2,000 free minutes/month. Daily long-form at 6 minutes
-# would alone consume ~3,600 and blow the budget. That is why this runs
-# three days a week at 4 minutes by default.
+# Each video is its own matrix job, so they render in parallel (~65 min wall
+# clock) instead of one 3-hour job. Billing is by minutes consumed, so the
+# matrix does not save minutes — it just keeps every job well inside the
+# 6-hour job ceiling and means one failure does not lose the other two.
 #
-# If you want daily long-form, pick one:
-#   1. make the repo PUBLIC  -> Actions minutes become unlimited and free
-#   2. set supersample to 1  -> about 4x faster, slightly jaggier edges
-#   3. move rendering to a free always-on VM (see SETUP_PHONE.md)
+# COST — this is the expensive workflow. A long video is N short renders
+# glued together, and on a 2-core runner a 28-second segment is 8-12 min:
+#     3 long/day at 4 minutes each  ~= 190 runner-min/day  ~= 5,700/month
+#     plus kids-daily.yml's shorts  ~=  20 runner-min/day  ~=   600/month
+# A PRIVATE repo has 2,000 free minutes/month, so this schedule needs the
+# repo to be PUBLIC (unlimited free minutes) or it stops around day 10.
+# The other options are a lower `minutes` input, supersample 1, or moving
+# rendering to a free always-on VM. See SETUP_PHONE.md.
 name: Kids long-form video
 
 on:
   schedule:
-    # 01:12 UTC ~= 06:42 IST, Mon/Wed/Fri. Off the hour on purpose — see
-    # the note in kids-daily.yml about scheduler congestion at :00.
-    - cron: "12 1 * * 1,3,5"
+    # 00:47 UTC ~= 06:17 IST. Off the top of the hour on purpose: GitHub's
+    # shared scheduler is most congested at :00 and queues behind it.
+    - cron: "47 0 * * *"
   workflow_dispatch:
     inputs:
+      count:
+        description: "How many long videos this run"
+        default: "3"
+        type: choice
+        options: ["1", "2", "3"]
       minutes:
-        description: "Target video length in minutes"
+        description: "Target length of each video, in minutes"
         default: "4"
         type: string
       privacy:
@@ -37,17 +42,34 @@ on:
         type: choice
         options: ["2", "1"]
 
-concurrency:
-  group: kids-upload          # shares the lock with kids-daily.yml
-  cancel-in-progress: false
-
 permissions:
   contents: write
 
 jobs:
-  build-long:
+  # Turn the requested count into a matrix list, so a manual run can build
+  # fewer than the scheduled three without editing the file.
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    outputs:
+      slots: ${{ steps.mk.outputs.slots }}
+    steps:
+      - id: mk
+        run: |
+          N="${{ github.event.inputs.count || '3' }}"
+          case "$N" in
+            1) echo 'slots=["1"]' >> "$GITHUB_OUTPUT" ;;
+            2) echo 'slots=["1","2"]' >> "$GITHUB_OUTPUT" ;;
+            *) echo 'slots=["1","2","3"]' >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  build-long:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false          # one bad video must not cancel the others
+      matrix:
+        slot: ${{ fromJson(needs.plan.outputs.slots) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +83,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-comic-neue fonts-dejavu-core
           ffmpeg -version | head -1
-          ffprobe -version | head -1
 
       - name: Install Python packages
         run: pip install --quiet -r requirements.txt
@@ -92,16 +113,20 @@ jobs:
           else
             echo "::error::No kids credentials. This workflow deliberately"
             echo "::error::does NOT fall back to the rings token, because a"
-            echo "::error::long kids video must not land on the rings channel."
+            echo "::error::kids video must never land on the rings channel."
             exit 1
           fi
 
-      - name: Build the long video
+      - name: Build one long video
         env:
           KIDS_SS: ${{ github.event.inputs.supersample || '2' }}
         run: |
           mkdir -p queue published
-          python make_long.py \
+          # Distinct seed per slot per day, so the three videos of a day
+          # never coincide and tomorrow's never repeat today's.
+          SEED=$(( ( $(date -u +%Y%m%d) * 7 + ${{ matrix.slot }} * 104729 ) % 999983 ))
+          echo "slot ${{ matrix.slot }} seed $SEED"
+          python make_long.py --seed "$SEED" \
             --minutes "${{ github.event.inputs.minutes || '4' }}" \
             --outdir queue
 
@@ -118,7 +143,8 @@ jobs:
           python upload_youtube.py $ARGS | tee upload_out.txt
 
       - name: Record what was published
-        # Bookkeeping only — must never fail the job once the video is up.
+        # Bookkeeping only — must never fail the job once the video is up,
+        # or retry.yml would re-render and publish a duplicate.
         if: success()
         continue-on-error: true
         run: |
@@ -127,21 +153,28 @@ jobs:
             | while read -r url; do
                 echo "$STAMP  LONG  $url" >> uploads.log
               done
-          if [ -z "$(git status --porcelain uploads.log)" ]; then
-            echo "Nothing new to log."; exit 0
-          fi
+          [ -z "$(git status --porcelain uploads.log)" ] && exit 0
           git config user.name  "shorts-factory-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uploads.log
-          git commit -m "log: long-form upload $STAMP"
-          git pull --rebase
-          git push
+          # Three matrix jobs finish around the same time and all push to
+          # the same branch, so retry the rebase-push a few times.
+          for attempt in 1 2 3 4 5; do
+            git add uploads.log
+            git diff --cached --quiet && break
+            git commit -m "log: long-form upload $STAMP (slot ${{ matrix.slot }})"
+            if git pull --rebase -q && git push -q; then
+              echo "logged on attempt $attempt"; break
+            fi
+            echo "push race, retrying ($attempt)"
+            git reset --soft HEAD~1 2>/dev/null || true
+            sleep $(( attempt * 7 ))
+          done
 
       - name: Keep the render if something failed
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-long-${{ github.run_id }}
+          name: failed-long-${{ github.run_id }}-${{ matrix.slot }}
           path: |
             queue/
             upload_out.txt
