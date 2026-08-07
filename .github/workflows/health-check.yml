@@ -1,0 +1,85 @@
+# Read-only check that the kids channel wiring is still healthy.
+#
+# Run this any time uploads look wrong, or after changing credentials. It
+# touches nothing — it refreshes the token, names the channel, and reports
+# how the most recent uploads are actually labelled on YouTube's side
+# (which is the only labelling that counts for COPPA).
+name: Health check (kids channel)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet google-auth google-api-python-client
+
+      - name: Check token, channel and recent uploads
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from google.oauth2.credentials import Credentials
+          from google.auth.transport.requests import Request
+          from googleapiclient.discovery import build
+
+          missing = [k for k in ("YT_CLIENT_ID", "YT_CLIENT_SECRET",
+                                 "YT_REFRESH_TOKEN")
+                     if not os.environ.get(k)]
+          if missing:
+              raise SystemExit(f"::error::missing secrets: {missing}")
+
+          c = Credentials(
+              token=None,
+              refresh_token=os.environ["YT_REFRESH_TOKEN"],
+              client_id=os.environ["YT_CLIENT_ID"],
+              client_secret=os.environ["YT_CLIENT_SECRET"],
+              token_uri="https://oauth2.googleapis.com/token",
+          )
+          c.refresh(Request())
+          print("TOKEN: refreshes OK")
+
+          yt = build("youtube", "v3", credentials=c)
+          ch = yt.channels().list(part="snippet,contentDetails",
+                                  mine=True).execute()["items"][0]
+          print("CHANNEL:", ch["snippet"]["title"])
+          uploads = ch["contentDetails"]["relatedPlaylists"]["uploads"]
+
+          pl = yt.playlistItems().list(part="contentDetails",
+                                       playlistId=uploads,
+                                       maxResults=10).execute()
+          ids = [i["contentDetails"]["videoId"] for i in pl.get("items", [])]
+          if not ids:
+              print("no uploads yet")
+              raise SystemExit(0)
+
+          vids = yt.videos().list(part="snippet,status",
+                                  id=",".join(ids)).execute()["items"]
+          print()
+          print(f"{'video':14} {'privacy':10} {'madeForKids':12} title")
+          bad = 0
+          for v in vids:
+              st = v["status"]
+              mfk = st.get("madeForKids")
+              if not mfk:
+                  bad += 1
+              print(f"{v['id']:14} {st['privacyStatus']:10} "
+                    f"{str(mfk):12} {v['snippet']['title'][:52]}")
+          print()
+          if bad:
+              print(f"::error::{bad} upload(s) are NOT marked made-for-kids")
+              raise SystemExit(1)
+          print("All uploads are correctly marked made-for-kids.")
+          PY
