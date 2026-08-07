@@ -27,10 +27,37 @@ jobs:
       github.event.workflow_run.run_attempt < 3
     runs-on: ubuntu-latest
     steps:
-      - name: Wait out the incident, then re-run the failed job
+      - name: Wait out the incident, then re-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
         run: |
           sleep 180
-          gh run rerun ${{ github.event.workflow_run.id }} \
-            --failed --repo ${{ github.repository }}
+
+          # When GitHub cannot allocate a runner the job ends as CANCELLED
+          # with zero steps recorded — nothing of ours ever executed. That
+          # is the case this workflow exists for, and `gh run rerun
+          # --failed` does NOT cover it, because the job never "failed".
+          # It silently did nothing on 6 Aug, which is why this is explicit
+          # now.
+          steps_run=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+                        --jq '[.jobs[].steps[]?
+                               | select(.conclusion != null)] | length')
+          echo "steps that actually executed: ${steps_run:-unknown}"
+
+          if [ "${steps_run:-0}" -eq 0 ]; then
+            # Nothing ran, so a full re-run cannot duplicate an upload.
+            echo "No steps executed -> runner was never allocated."
+            gh run rerun "$RUN_ID" --repo "$REPO"
+          else
+            # Something did run. A blind re-run could re-render and publish
+            # a second video, so only retry the failed jobs, and if that is
+            # not possible leave it alone and say so loudly.
+            echo "Steps executed -> real failure, retrying failed jobs only."
+            gh run rerun "$RUN_ID" --failed --repo "$REPO" || {
+              echo "::warning::Could not re-run. Check this run by hand;"
+              echo "::warning::not forcing a full re-run, because that"
+              echo "::warning::risks publishing a duplicate video."
+            }
+          fi
