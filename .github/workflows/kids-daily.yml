@@ -117,6 +117,10 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           KIDS_SS: ${{ github.event.inputs.supersample || '2' }}
         run: |
+          # Without pipefail, `python ... | tee` reports TEE's exit code, so
+          # a crashed upload shows as a green run and the retry never fires.
+          # That silently hid an invalid_grant failure on 7 Aug.
+          set -o pipefail
           COUNT="${{ github.event.inputs.count || '1' }}"
           PRIVACY="${{ github.event.inputs.privacy || '' }}"
 

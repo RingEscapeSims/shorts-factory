@@ -137,6 +137,9 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: |
+          # Without pipefail the pipeline reports TEE's exit code, so a
+          # crashed upload would show as a green run. See kids-daily.yml.
+          set -o pipefail
           PRIVACY="${{ github.event.inputs.privacy || '' }}"
           ARGS="--dir queue --archive published"
           if [ -n "$PRIVACY" ]; then ARGS="$ARGS --privacy $PRIVACY"; fi
