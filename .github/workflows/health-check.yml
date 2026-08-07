@@ -4,7 +4,7 @@
 # touches nothing — it refreshes the token, names the channel, and reports
 # how the most recent uploads are actually labelled on YouTube's side
 # (which is the only labelling that counts for COPPA).
-name: Health check (kids channel)
+name: Health check (both channels)
 
 on:
   workflow_dispatch:
@@ -13,6 +13,60 @@ permissions:
   contents: read
 
 jobs:
+  rings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet google-auth google-api-python-client
+
+      - name: Can the rings token still be refreshed?
+        env:
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from google.oauth2.credentials import Credentials
+          from google.auth.transport.requests import Request
+          from googleapiclient.discovery import build
+          from googleapiclient.errors import HttpError
+
+          tok = json.loads(os.environ["TOKEN_JSON"])
+          cs = json.loads(os.environ["CLIENT_SECRET_JSON"])
+          node = cs.get("installed") or cs.get("web") or cs
+
+          c = Credentials(
+              token=None,
+              refresh_token=tok["refresh_token"],
+              client_id=tok.get("client_id") or node["client_id"],
+              client_secret=tok.get("client_secret") or node["client_secret"],
+              token_uri="https://oauth2.googleapis.com/token",
+          )
+          try:
+              c.refresh(Request())
+          except Exception as e:
+              print("::error::RINGS TOKEN IS DEAD:", e)
+              print("::error::Re-authorize the rings channel; this is what")
+              print("::error::happens when the app sits in Testing mode.")
+              raise SystemExit(1)
+          print("RINGS TOKEN: refreshes OK")
+
+          # Naming the channel needs the readonly scope, which the rings
+          # token may not carry. Not having it is fine, so don't fail on it.
+          try:
+              yt = build("youtube", "v3", credentials=c)
+              ch = yt.channels().list(part="snippet", mine=True).execute()
+              items = ch.get("items", [])
+              print("RINGS CHANNEL:",
+                    items[0]["snippet"]["title"] if items else "(none returned)")
+          except HttpError as e:
+              print("RINGS CHANNEL: not checkable "
+                    f"(token lacks readonly scope) - {e.resp.status}")
+          PY
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
