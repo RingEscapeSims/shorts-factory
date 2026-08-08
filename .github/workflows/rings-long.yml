@@ -1,0 +1,130 @@
+# Chaptered multi-mechanic long-form for the RINGS channel, 3x a week.
+#
+# Why this exists: the ring-escape Short has a hard ceiling — every upload in
+# the format's recent cohort sits under ~1.1k views. The two biggest channels
+# in the niche abandoned it; the one still growing (500k+ subs) moved to
+# 2-4 minute chaptered multi-sim long-form and does 55k-180k weekly. Long-form
+# also pays 10-100x Shorts per view, and a video of six genuinely different
+# rules is not "a template with minimal variation".
+#
+# Paired with daily.yml dropping from 2 Shorts/day to 1: fewer, more varied
+# uploads, which is both the growth bet and the policy defence.
+#
+# CREDENTIALS — read before editing.
+# This uses the rings token (CLIENT_SECRET_JSON + TOKEN_JSON) written to
+# disk. It must NEVER set YT_CLIENT_ID / YT_CLIENT_SECRET / YT_REFRESH_TOKEN,
+# because those now belong to the KIDS channel (Cloudtop Kids, a separate
+# Google account and Cloud project). upload_youtube.get_service() prefers env
+# credentials over token.json, so exporting them here would silently publish
+# rings videos to the kids channel.
+name: Rings long-form
+
+on:
+  schedule:
+    # Tue / Thu / Sat at 20:41 UTC. Off the hour, and on different days from
+    # nothing else, so the rings channel posts something every day without
+    # two uploads ever landing together.
+    - cron: '41 20 * * 2,4,6'
+  workflow_dispatch:
+    inputs:
+      chapters:
+        description: "How many rules in the compilation"
+        default: "6"
+        type: choice
+        options: ["4", "5", "6", "7", "8"]
+      privacy:
+        description: "Privacy for this run"
+        default: "unlisted"
+        type: choice
+        options: [unlisted, public, private]
+
+permissions:
+  contents: write
+
+jobs:
+  build-long:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg and fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Install Python packages
+        run: pip install --quiet numpy pillow google-api-python-client google-auth-oauthlib
+
+      - name: Write rings credentials
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+        run: |
+          if [ -z "$TOKEN_JSON" ] || [ -z "$CLIENT_SECRET_JSON" ]; then
+            echo "::error::Rings credentials missing."
+            exit 1
+          fi
+          printf '%s' "$CLIENT_SECRET_JSON" > client_secret.json
+          printf '%s' "$TOKEN_JSON" > token.json
+          echo "Using the rings channel token."
+
+      - name: Build the compilation
+        run: |
+          mkdir -p queue published
+          python make_rings_long.py \
+            --chapters "${{ github.event.inputs.chapters || '6' }}" \
+            --outdir queue
+
+      - name: Upload
+        # NOTE: no YT_* env here on purpose — see the header. CI=true only so
+        # upload_youtube refuses to try an interactive browser flow.
+        env:
+          CI: "true"
+        run: |
+          set -o pipefail
+          PRIVACY="${{ github.event.inputs.privacy || '' }}"
+          ARGS="--dir queue --archive published"
+          if [ -n "$PRIVACY" ]; then ARGS="$ARGS --privacy $PRIVACY"; fi
+          python upload_youtube.py $ARGS | tee upload_out.txt
+
+      - name: Record what was published
+        # Bookkeeping only — must never fail the job once the video is up, or
+        # retry.yml would re-render and publish a duplicate.
+        if: success()
+        continue-on-error: true
+        run: |
+          STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          grep -o 'https://youtube.com/[A-Za-z0-9_/-]*' upload_out.txt \
+            | while read -r url; do
+                echo "$STAMP  RINGS-LONG  $url" >> upload_log.txt
+              done
+          [ -z "$(git status --porcelain upload_log.txt)" ] && exit 0
+          git config user.name  "shorts-factory-bot"
+          git config user.email "actions@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git add upload_log.txt
+            git diff --cached --quiet && break
+            git commit -m "log: rings long-form $STAMP"
+            if git pull --rebase -q && git push -q; then break; fi
+            git reset --soft HEAD~1 2>/dev/null || true
+            sleep $(( attempt * 7 ))
+          done
+
+      - name: Keep the render if something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-ringslong-${{ github.run_id }}
+          path: |
+            queue/
+            upload_out.txt
+          retention-days: 7
+          if-no-files-found: ignore

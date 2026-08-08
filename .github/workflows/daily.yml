@@ -2,10 +2,18 @@ name: shorts-factory
 
 on:
   schedule:
-    # 13:23 & 22:17 UTC ~= 9:20 AM & 6:15 PM US Eastern (summer).
-    # Deliberately off the top of the hour: GitHub's shared scheduler is most
-    # congested at :00, and scheduled runs queue behind that spike.
-    - cron: '23 13 * * *'
+    # ONE Short per day, down from two (8 Aug 2026).
+    #
+    # This is deliberate and counter-intuitive. 8 videos at ~1,000 views each
+    # showed volume was never the bottleneck — the format's whole recent
+    # cohort sits under ~1.1k regardless of who uploads it. Meanwhile daily
+    # templated output is the exact signal behind January's terminations, so
+    # the second daily slot was buying nothing and costing risk. The freed
+    # capacity goes to rings-long.yml instead, which is where the one
+    # still-growing channel in this niche went.
+    #
+    # 22:17 UTC ~= 6:15 PM US Eastern. Off the top of the hour on purpose:
+    # GitHub's shared scheduler is most congested at :00.
     - cron: '17 22 * * *'
   workflow_dispatch: {}
 

@@ -12,7 +12,8 @@ name: retry-failed-upload
 on:
   workflow_run:
     workflows:
-      - "shorts-factory"          # rings
+      - "shorts-factory"          # rings Shorts
+      - "Rings long-form"         # rings compilations
       - "Daily kids videos"       # kids Shorts
       - "Kids long-form video"    # kids long-form
     types: [completed]
