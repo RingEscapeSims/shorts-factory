@@ -90,30 +90,148 @@ def load_font(size):
 # ----------------------------------------------------------------------------
 PALETTES = ["neon_rainbow", "sunset", "ice", "toxic", "candy"]
 
-HOOKS = [
-    "Can it escape all {n} rings?",
-    "The last ring is the hardest",
-    "Nobody predicts the final bounce",
-    "Watch until the escape",
-    "{n} rings. One ball. No mercy.",
-    "Odds of escape: 1 in {n}",
-    "Do NOT blink at the end",
+# The on-screen hook and the title now STATE THE RULE of the video's
+# mechanic. The old set was interchangeable hype ("Rated IMPOSSIBLE") plus a
+# meaningless seed number, on a format where the ball always escaped — so
+# the title asked a question every video answered the same way. Within one
+# week of the same niche, the videos that beat the ~1k ceiling were the ones
+# whose titles named a rule; the hype-titled ones sat at 500-1.1k.
+HOOKS = {
+    "classic": "{n} rings. One gap each.",
+    "timer":   "Beat the clock",
+    "shrink":  "The gaps are closing",
+    "armour":  "Every ring takes hits",
+    "budget":  "Limited bounces",
+    "race":    "Red vs Blue",
+    "split":   "Every escape splits the ball",
+}
+
+# {n} rings, {secs} seconds, {deadline}, {budget}, {winner}, {balls}.
+# No seed, no unfalsifiable claims, and nothing that promises an outcome the
+# video may not deliver — failures publish too now.
+TITLES = {
+    "classic": [
+        "{n} rings, one gap each — {secs}s",
+        "One ball, {n} rotating rings, no cuts",
+        "Every ring spins against the last ({n} rings)",
+        "Watch the gaps, not the ball — {n} rings",
+    ],
+    "timer": [
+        "{deadline} seconds to clear {n} rings",
+        "Can it clear {n} rings before the timer?",
+        "{deadline}s on the clock, {n} rings to break",
+        "The clock does not stop for {n} rings",
+    ],
+    "shrink": [
+        "The gaps close as it goes — {n} rings",
+        "Every second the way out gets smaller",
+        "{n} rings, and the gaps are shrinking",
+        "Escape before the gaps close",
+    ],
+    "armour": [
+        "Every ring takes several hits — {n} rings",
+        "You have to wear each ring down first",
+        "{n} armoured rings, one ball",
+        "No shortcuts: chip through {n} rings",
+    ],
+    "budget": [
+        "{budget} bounces to clear {n} rings",
+        "Only {budget} bounces. {n} rings.",
+        "Can {budget} bounces break {n} rings?",
+        "{budget} bounce limit, {n} rings",
+    ],
+    "race": [
+        "Red vs Blue — {n} rings, one winner",
+        "Two balls, {n} rings, first one out wins",
+        "Which colour clears {n} rings first?",
+        "Red or Blue? {n} rings decide it",
+    ],
+    "split": [
+        "Every escape splits the ball — {n} rings",
+        "One ball becomes {balls} by ring {n}",
+        "Each ring it clears, it multiplies",
+        "Starts as one. Ends as {balls}.",
+    ],
+}
+
+# Describes what is in the video. Dropped "asmr" (there are no ASMR
+# triggers in it) and "relaxing" (the ball runs at up to 1900 px/s), both of
+# which were misleading-metadata risks, plus every bare single word a
+# 4-subscriber channel cannot rank on.
+BASE_TAGS = [
+    "bouncing ball simulation",
+    "ball escapes rings",
+    "rotating ring physics",
+    "physics simulation short",
+    "procedural animation",
+    "generative animation",
+    "oddly satisfying physics",
+    "code generated animation",
 ]
 
-TITLES = [
-    "This ball won't stop until it escapes 🔴 sim #{seed}",
-    "Can the ball escape all {n} rings? 😳 #{seed}",
-    "Rated IMPOSSIBLE: ring escape #{seed} 🌀",
-    "The most satisfying escape you'll see today 🎯 #{seed}",
-    "{n} rings vs 1 ball… who wins? 🔥 sim #{seed}",
-    "Physics says this shouldn't work 🤯 sim #{seed}",
-]
 
-TAGS = [
-    "satisfying", "oddly satisfying", "physics", "simulation", "asmr",
-    "ball", "escape", "animation", "relaxing", "shorts", "physics simulation",
-    "bouncing ball", "satisfying video",
-]
+# ----------------------------------------------------------------------------
+# MECHANICS — the rule each video is built around
+#
+# The old engine shipped one rule (escape every ring) jittered by a seed, and
+# discarded any seed where the ball failed. So the outcome was fixed, the
+# title asked a question with a known answer, and every video was the same
+# video. That is both why the format flatlined at ~1k views and why it reads
+# as "minimal variation across videos" to the monetization classifier.
+#
+# A mechanic is a NAMED rule with a stated stake that can genuinely fail.
+# The title says the rule, the HUD tracks it, and the outcome is in doubt.
+# ----------------------------------------------------------------------------
+MECHANICS = {
+    "classic": dict(
+        label="Escape every ring",
+        can_fail=False,
+        balls=1,
+        hud="rings",
+    ),
+    "timer": dict(
+        label="Beat the clock",
+        can_fail=True,          # genuinely publishes failures
+        balls=1,
+        hud="timer",
+    ),
+    "shrink": dict(
+        label="Gaps close over time",
+        can_fail=True,
+        balls=1,
+        hud="rings",
+    ),
+    "armour": dict(
+        label="Every ring takes hits",
+        can_fail=False,
+        balls=1,
+        hud="armour",
+    ),
+    "budget": dict(
+        label="Limited bounces",
+        can_fail=True,
+        balls=1,
+        hud="budget",
+    ),
+    "race": dict(
+        label="Two balls, one winner",
+        can_fail=False,
+        balls=2,
+        hud="race",
+    ),
+    "split": dict(
+        label="Each escape splits the ball",
+        can_fail=False,
+        balls=1,
+        hud="count",
+    ),
+}
+
+BALL_COLORS = [(255, 74, 92), (74, 168, 255), (255, 206, 66), (120, 255, 150)]
+BALL_NAMES = ["RED", "BLUE", "GOLD", "GREEN"]
+
+SHRINK_RATE = 0.055       # gap width lost per second in the shrink mechanic
+GAP_FLOOR = 0.16          # a gap never closes fully, or nothing can resolve
 
 
 @dataclass
@@ -123,13 +241,35 @@ class RingCfg:
     gap_w0: float        # initial gap width (rad)
     omega: float         # angular velocity (rad/s)
     color: tuple
+    hp: int = 1          # hits needed before the gap will let the ball out
+    shrinks: bool = False   # this ring's gap closes over time
 
     def gap_start(self, t):
         return (self.gap0 + self.omega * t) % (2 * math.pi)
 
     def gap_width(self, t):
-        # gaps widen very slowly so every seed eventually resolves
+        if self.shrinks:
+            # Only the OUTER rings close. Applying it to every ring made the
+            # mechanic uniformly brutal — measured, the ball cleared a median
+            # of 50% of rings and then died, which is a dud rather than a
+            # near-miss. Closing only the last rings lets the run build
+            # normally and puts the squeeze exactly where the old format went
+            # dead, which is the whole point.
+            return max(self.gap_w0 * (1.0 - SHRINK_RATE * t), GAP_FLOOR)
+        # gaps widen very slowly so most seeds eventually resolve
         return min(self.gap_w0 * (1.0 + 0.012 * t), 1.6)
+
+
+@dataclass
+class Ball:
+    pos: np.ndarray
+    vel: np.ndarray
+    cage: int = 0
+    color: tuple = (255, 255, 255)
+    name: str = "RED"
+    idx: int = 0
+    done_t: float = None      # when it cleared the last ring
+    bounces: int = 0
 
 
 @dataclass
@@ -144,6 +284,10 @@ class Config:
     speed_cap: float
     root_midi: int
     hook: str
+    mechanic: str = "classic"
+    deadline: float = 0.0       # timer mechanic
+    bounce_budget: int = 0      # budget mechanic
+    bg_style: int = 0           # which background treatment
 
 
 def hsv255(h, s, v):
@@ -151,9 +295,23 @@ def hsv255(h, s, v):
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
-def build_config(seed: int) -> Config:
+def _shrink_deadline(rings):
+    """When the widest remaining gap hits the floor, the run is over.
+
+    Plus a short grace period so the last moments are a genuine scramble
+    rather than an instant cut.
+    """
+    widest = max(r.gap_w0 for r in rings)
+    return (1.0 - GAP_FLOOR / widest) / SHRINK_RATE + 1.5
+
+
+def build_config(seed: int, mechanic: str = None) -> Config:
     rng = random.Random(seed)
-    n = rng.randint(5, 8)
+    mech = mechanic or rng.choice(list(MECHANICS))
+    spec = MECHANICS[mech]
+    # armour rings take several hits each, so use fewer of them or the run
+    # drags well past the length gate
+    n = rng.randint(4, 5) if mech == "armour" else rng.randint(5, 8)
     palette = rng.choice(PALETTES)
     hue0 = rng.random()
 
@@ -173,12 +331,18 @@ def build_config(seed: int) -> Config:
         else:  # candy
             col = hsv255((0.85 + 0.25 * i / n) % 1.0, 0.65, 1.0)
         direction = 1 if i % 2 == 0 else -1
+        # only the outermost two rings close, and they start wider so the
+        # squeeze is a real change rather than an instant wall
+        closing = (mech == "shrink" and i >= n - 2)
         rings.append(RingCfg(
             radius=float(r),
             gap0=rng.uniform(0, 2 * math.pi),
-            gap_w0=rng.uniform(0.50, 0.80),
+            gap_w0=rng.uniform(0.95, 1.25) if closing
+            else rng.uniform(0.50, 0.80),
             omega=direction * rng.uniform(0.6, 1.5),
             color=col,
+            hp=rng.randint(3, 6) if mech == "armour" else 1,
+            shrinks=closing,
         ))
 
     return Config(
@@ -191,7 +355,16 @@ def build_config(seed: int) -> Config:
         speed_floor=rng.uniform(660, 760),
         speed_cap=1900.0,
         root_midi=rng.randint(52, 62),
-        hook=rng.choice(HOOKS).format(n=n),
+        hook=HOOKS[mech].format(n=n),
+        mechanic=mech,
+        # timer: an explicit clock. shrink: the clock is implicit — once the
+        # gaps bottom out the run is unwinnable, so make that the deadline
+        # instead of letting the sim grind on to MAX_SIM_SECONDS and get
+        # thrown away (which is why shrink never produced a failure).
+        deadline=(float(rng.randint(11, 17)) if mech == "timer"
+                  else _shrink_deadline(rings) if mech == "shrink" else 0.0),
+        bounce_budget=rng.randint(38, 70) if mech == "budget" else 0,
+        bg_style=rng.randrange(4),
     )
 
 
@@ -201,11 +374,18 @@ def build_config(seed: int) -> Config:
 @dataclass
 class SimResult:
     ok: bool
-    frames: list = field(default_factory=list)   # per-frame (x, y)
+    # frames[i] is a list of (x, y, colour, radius) — one entry per live ball,
+    # so multi-ball mechanics render from the same structure as single-ball.
+    frames: list = field(default_factory=list)
     events: list = field(default_factory=list)   # dicts: type, t, ring, pos, speed
     break_times: dict = field(default_factory=dict)
     escape_t: float = 0.0
     duration: float = 0.0
+    outcome: str = "escaped"      # escaped | trapped | winner
+    winner: str = ""              # race: which ball won
+    ball_count: int = 1           # split: how many existed at the end
+    bounces: int = 0
+    hp_left: dict = field(default_factory=dict)   # armour: ring -> hp remaining
 
 
 def in_gap(theta, ring: RingCfg, t, margin):
@@ -216,77 +396,140 @@ def in_gap(theta, ring: RingCfg, t, margin):
 
 
 def simulate(cfg: Config) -> SimResult:
+    """Physics for every mechanic.
+
+    One loop handles all of them: balls is a list, each ring carries hp, and
+    the mechanic only changes the win/lose test at the end. Keeping a single
+    physics path means a new mechanic cannot quietly get different physics.
+    """
     rng = random.Random(cfg.seed ^ 0xBEEF)
+    spec = MECHANICS[cfg.mechanic]
     cx, cy = CENTER
     ball_r = 20.0
-    ang = rng.uniform(0, 2 * math.pi)
-    pos = np.array([cx, cy - 40.0])
-    vel = np.array([math.cos(ang), math.sin(ang)]) * rng.uniform(550, 700)
 
-    alive = [True] * cfg.n_rings
-    cage = 0
+    balls = []
+    for i in range(spec["balls"]):
+        ang = rng.uniform(0, 2 * math.pi) + i * math.pi
+        balls.append(Ball(
+            pos=np.array([cx + (i - (spec["balls"] - 1) / 2) * 46.0,
+                          cy - 40.0]),
+            vel=np.array([math.cos(ang), math.sin(ang)]) * rng.uniform(550, 700),
+            color=BALL_COLORS[i], name=BALL_NAMES[i], idx=i))
+
+    hp = {i: r.hp for i, r in enumerate(cfg.rings)}
     res = SimResult(ok=False)
     t = 0.0
-    frame_i = 0
     breaks = 0
     escape_t = None
-
+    total_bounces = 0
     max_steps = int(MAX_SIM_SECONDS * FPS * SUBSTEPS)
+
     for step in range(max_steps):
-        vel[1] += cfg.gravity * DT
-        pos = pos + vel * DT
         t += DT
+        for b in balls:
+            if b.done_t is not None:
+                # already out: keep flying so the exit reads on screen
+                b.vel[1] += cfg.gravity * DT
+                b.pos = b.pos + b.vel * DT
+                continue
 
-        if cage < cfg.n_rings:
-            ring = cfg.rings[cage]
-            dx, dy = pos[0] - cx, pos[1] - cy
+            b.vel[1] += cfg.gravity * DT
+            b.pos = b.pos + b.vel * DT
+
+            if b.cage >= cfg.n_rings:
+                b.done_t = t
+                continue
+
+            ring = cfg.rings[b.cage]
+            dx, dy = b.pos[0] - cx, b.pos[1] - cy
             dist = math.hypot(dx, dy)
-            if dist + ball_r >= ring.radius:
-                theta = math.atan2(dy, dx) % (2 * math.pi)
-                margin = (ball_r + 4.0) / ring.radius
-                if in_gap(theta, ring, t, margin):
-                    # clean pass through the gap -> ring shatters
-                    alive[cage] = False
-                    res.break_times[cage] = t
-                    res.events.append(dict(type="break", t=t, ring=cage,
-                                           pos=(float(pos[0]), float(pos[1]))))
-                    breaks += 1
-                    cage += 1
-                    if cage == cfg.n_rings:
-                        escape_t = t
-                else:
-                    n_vec = np.array([dx, dy]) / max(dist, 1e-6)
-                    v_dot = float(vel @ n_vec)
-                    if v_dot > 0:
-                        vel = vel - 2.0 * v_dot * n_vec
-                        # rotating ring imparts a tangential kick
-                        tang = np.array([-n_vec[1], n_vec[0]])
-                        vel = vel + tang * ring.omega * ring.radius * 0.18
-                        speed = float(np.linalg.norm(vel))
-                        floor = cfg.speed_floor + 30.0 * breaks
-                        if speed < floor:
-                            vel *= floor / max(speed, 1e-6)
-                        elif speed > cfg.speed_cap:
-                            vel *= cfg.speed_cap / speed
-                        pos = np.array([cx, cy]) + n_vec * (ring.radius - ball_r - 0.5)
-                        res.events.append(dict(
-                            type="bounce", t=t, ring=cage,
-                            pos=(float(pos[0]), float(pos[1])),
-                            speed=float(np.linalg.norm(vel))))
-        else:
-            # escaped: fly free for a moment, then stop the sim
-            if t - escape_t > 1.3:
-                break
+            if dist + ball_r < ring.radius:
+                continue
 
-        # record one trajectory sample per rendered frame
+            theta = math.atan2(dy, dx) % (2 * math.pi)
+            margin = (ball_r + 4.0) / ring.radius
+            # armour: the gap only lets you out once the ring is worn down
+            worn = hp[b.cage] <= 1
+            if worn and in_gap(theta, ring, t, margin):
+                hp[b.cage] = 0
+                res.break_times[b.cage] = t
+                res.events.append(dict(type="break", t=t, ring=b.cage,
+                                       pos=(float(b.pos[0]), float(b.pos[1])),
+                                       ball=b.idx))
+                breaks += 1
+                b.cage += 1
+                if cfg.mechanic == "split" and len(balls) < 4:
+                    # each escape spawns a companion in the next ring out
+                    a2 = rng.uniform(0, 2 * math.pi)
+                    balls.append(Ball(
+                        pos=b.pos.copy(),
+                        vel=np.array([math.cos(a2), math.sin(a2)])
+                        * float(np.linalg.norm(b.vel)),
+                        cage=b.cage,
+                        color=BALL_COLORS[len(balls) % len(BALL_COLORS)],
+                        name=BALL_NAMES[len(balls) % len(BALL_NAMES)],
+                        idx=len(balls)))
+                if b.cage == cfg.n_rings:
+                    b.done_t = t
+                    if escape_t is None:
+                        escape_t = t
+                        res.winner = b.name
+                continue
+
+            n_vec = np.array([dx, dy]) / max(dist, 1e-6)
+            v_dot = float(b.vel @ n_vec)
+            if v_dot <= 0:
+                continue
+            if hp[b.cage] > 1:
+                hp[b.cage] -= 1        # chip the armour: visible progress
+            b.vel = b.vel - 2.0 * v_dot * n_vec
+            tang = np.array([-n_vec[1], n_vec[0]])
+            b.vel = b.vel + tang * ring.omega * ring.radius * 0.18
+            speed = float(np.linalg.norm(b.vel))
+            floor = cfg.speed_floor + 30.0 * breaks
+            if speed < floor:
+                b.vel *= floor / max(speed, 1e-6)
+            elif speed > cfg.speed_cap:
+                b.vel *= cfg.speed_cap / speed
+            b.pos = np.array([cx, cy]) + n_vec * (ring.radius - ball_r - 0.5)
+            b.bounces += 1
+            total_bounces += 1
+            res.events.append(dict(
+                type="bounce", t=t, ring=b.cage,
+                pos=(float(b.pos[0]), float(b.pos[1])),
+                speed=float(np.linalg.norm(b.vel)), ball=b.idx))
+
+        # ---- mechanic stop conditions ----
+        if cfg.mechanic == "race":
+            if escape_t is not None and t - escape_t > 1.3:
+                break
+        elif cfg.mechanic in ("timer", "shrink") and t >= cfg.deadline \
+                and escape_t is None:
+            res.outcome = "trapped"
+            escape_t = t
+            break
+        elif cfg.mechanic == "budget" and total_bounces > cfg.bounce_budget \
+                and escape_t is None:
+            res.outcome = "trapped"
+            escape_t = t
+            break
+        elif escape_t is not None and t - escape_t > 1.3:
+            break
+
         if step % SUBSTEPS == 0:
-            res.frames.append((float(pos[0]), float(pos[1])))
-            frame_i += 1
+            res.frames.append([
+                (float(b.pos[0]), float(b.pos[1]), b.color,
+                 ball_r, b.done_t is not None)
+                for b in balls])
+
+    res.ball_count = len(balls)
+    res.bounces = total_bounces
+    res.hp_left = dict(hp)
 
     if escape_t is None or not (TARGET_RANGE[0] <= escape_t <= TARGET_RANGE[1]):
         return res  # ok stays False
 
-    # Pacing gates. Escaping inside the window is not enough — the run also
+    # Pacing gates. Resolving inside the window is not enough — the run also
     # has to be watchable. Measured over 80 seeds of the old build, the
     # median seed opened with 4.6s of nothing and contained a 9.5s stretch
     # with no ring break (worst case 18.4s). Those are the two points where
@@ -299,25 +542,55 @@ def simulate(cfg: Config) -> SimResult:
     if max(b - a for a, b in zip(marks, marks[1:])) > MAX_BREAK_GAP:
         return res                      # dead stretch in the middle
 
+    # A failure is a legitimate, publishable outcome — that is the entire
+    # point of the mechanics that can fail. But a failure with nothing
+    # happening is not: require most of the rings to have gone first, so a
+    # "TRAPPED" ending reads as a near-miss rather than a dud.
+    if res.outcome == "trapped" and len(bt) < max(1, cfg.n_rings - 2):
+        return res
+    if res.outcome != "trapped":
+        res.outcome = "winner" if cfg.mechanic == "race" else "escaped"
+
     res.ok = True
     res.escape_t = escape_t
     res.duration = min(t, escape_t + 1.3) + OUTRO_SECONDS
     return res
 
 
-def find_seed(start_seed: int):
-    """Walk seeds until the sim resolves inside the target window."""
+FAIL_RATE = 0.25          # roughly 1 in 4 published videos ends in failure
+
+
+def find_seed(start_seed: int, mechanic: str = None):
+    """Walk seeds until the sim resolves inside the target window.
+
+    For mechanics that can fail, the outcome is steered rather than left to
+    chance: a quarter of runs are allowed to end TRAPPED. That is the whole
+    point — if the ball always gets out, the video contains no question, and
+    the old engine guaranteed success by discarding every failure.
+    """
     seed = start_seed
-    # Raised from 400. The pacing gates reject ~96% of seeds, and the worst
-    # measured walk was 125; this leaves ~10x headroom so a run never dies
+    mech = mechanic or random.Random(start_seed).choice(list(MECHANICS))
+    want_fail = (MECHANICS[mech]["can_fail"]
+                 and random.Random(start_seed ^ 0x5EED).random() < FAIL_RATE)
+
+    # Raised from 400. The pacing gates reject most seeds, and the worst
+    # measured walk was 125; this leaves headroom so a run never dies
     # looking for one. Rejected seeds are cheap — no rendering happens.
+    fallback = None
     for _ in range(1200):
-        cfg = build_config(seed)
+        cfg = build_config(seed, mech)
         sim = simulate(cfg)
         if sim.ok:
-            return cfg, sim
+            if (sim.outcome == "trapped") == want_fail:
+                return cfg, sim
+            # Right mechanic, wrong ending. Hold it in case the ending we
+            # asked for never turns up, so we still ship something.
+            if fallback is None:
+                fallback = (cfg, sim)
         seed += 1
-    raise RuntimeError("no viable seed found in 400 attempts")
+    if fallback is not None:
+        return fallback
+    raise RuntimeError(f"no viable seed for mechanic {mech!r} in 1200 tries")
 
 
 # ----------------------------------------------------------------------------
@@ -492,15 +765,19 @@ def render(cfg: Config, sim: SimResult, wav_path: str, out_path: str):
         trail *= 0.90
 
         # ball trail + sparks land in the additive buffer
-        if f < len(sim.frames):
-            bx, by = sim.frames[f]
-        else:
-            bx, by = sim.frames[-1]
+        snap = sim.frames[f] if f < len(sim.frames) else sim.frames[-1]
+        multi = len(snap) > 1 or cfg.mechanic in ("race", "split")
         hue = (cfg.hue0 + 0.035 * t) % 1.0
-        bcol = hsv255(hue, 0.8, 1.0)
         in_flight = t <= sim.escape_t + 1.3
-        if in_flight:
-            stamp(trail, ball_glow, bx, by, bcol, 1.15)
+        # Multi-ball mechanics need stable per-ball identity (RED vs BLUE has
+        # to mean something), so those keep their assigned colour. Single-ball
+        # keeps the old hue drift.
+        drawn = []
+        for (bx, by, bcol_i, brad, gone) in snap:
+            bcol = bcol_i if multi else hsv255(hue, 0.8, 1.0)
+            drawn.append((bx, by, bcol, brad))
+            if in_flight:
+                stamp(trail, ball_glow, bx, by, bcol, 1.15)
         for s in sparks:
             age = t - s[4]
             if 0 <= age < 0.8:
@@ -533,14 +810,26 @@ def render(cfg: Config, sim: SimResult, wav_path: str, out_path: str):
                     cx + ring.radius, cy + ring.radius]
             halo = ring.radius + 7
             bbox_h = [cx - halo, cy - halo, cx + halo, cy + halo]
+            # armour: thin the ring as it wears down, so every bounce is
+            # visible progress instead of ~95% of bounces meaning nothing
+            wid, hwid = 18, 26
+            if ring.hp > 1:
+                left = sim.hp_left.get(i, ring.hp)
+                frac = max(0.25, left / ring.hp)
+                wid = max(5, int(18 * frac))
+                hwid = max(8, int(26 * frac))
             # 10px arcs are ~3.4px on a phone. Thicker reads at thumb size.
-            dr.arc(bbox_h, g + wdeg, g + 360, fill=(*ring.color, 70), width=26)
-            dr.arc(bbox, g + wdeg, g + 360, fill=(*ring.color, 255), width=18)
+            dr.arc(bbox_h, g + wdeg, g + 360, fill=(*ring.color, 70), width=hwid)
+            dr.arc(bbox, g + wdeg, g + 360, fill=(*ring.color, 255), width=wid)
 
-        # ball core
+        # ball cores
         if in_flight:
-            dr.ellipse([bx - 20, by - 20, bx + 20, by + 20], fill=(*bcol, 255))
-            dr.ellipse([bx - 9, by - 9, bx + 9, by + 9], fill=(255, 255, 255, 255))
+            for (bx, by, bcol, brad) in drawn:
+                dr.ellipse([bx - brad, by - brad, bx + brad, by + brad],
+                           fill=(*bcol, 255))
+                dr.ellipse([bx - brad * 0.45, by - brad * 0.45,
+                            bx + brad * 0.45, by + brad * 0.45],
+                           fill=(255, 255, 255, 255))
 
         # -- text layer --
         def center_text(txt, y, font, fill=(255, 255, 255, 255), shadow=True):
@@ -550,18 +839,69 @@ def render(cfg: Config, sim: SimResult, wav_path: str, out_path: str):
                 dr.text((x + 3, y + 3), txt, font=font, fill=(0, 0, 0, 180))
             dr.text((x, y), txt, font=font, fill=fill)
 
-        center_text(cfg.hook, 170, font_hook)
+        # The hook was 56px at y=170 — small, and parked in the top dead
+        # zone. Bigger and lower puts the rule where attention actually is.
+        center_text(cfg.hook, 300, font_hook)
+
+        # HUD. Everything below ~y=1450 sits under the Shorts player chrome
+        # (title, @handle, action rail), so the old y=1560 counter was
+        # half-hidden and the y=1800 watermark was invisible to viewers
+        # while still reading as a machine tell. Both moved up / removed.
+        hud_kind = MECHANICS[cfg.mechanic]["hud"]
         if t < sim.escape_t:
-            center_text(f"RINGS LEFT: {rings_left}", 1560, font_counter,
-                        fill=(255, 255, 255, 230))
+            if hud_kind == "timer":
+                left = max(0.0, cfg.deadline - t)
+                urgent = left <= 3.0
+                col = (255, 90, 90, 255) if urgent else (255, 255, 255, 235)
+                center_text(f"{left:04.1f}s", 1330, font_counter, fill=col)
+                # a bar reads faster than digits at thumb size
+                bw, bh = 620, 16
+                bx0 = (W - bw) / 2
+                dr.rectangle([bx0, 1400, bx0 + bw, 1400 + bh],
+                             fill=(255, 255, 255, 60))
+                frac = left / max(cfg.deadline, 1e-6)
+                dr.rectangle([bx0, 1400, bx0 + bw * frac, 1400 + bh],
+                             fill=col)
+            elif hud_kind == "budget":
+                used = sum(1 for e in sim.events
+                           if e["type"] == "bounce" and e["t"] <= t)
+                left = max(0, cfg.bounce_budget - used)
+                col = (255, 90, 90, 255) if left <= 6 else (255, 255, 255, 235)
+                center_text(f"BOUNCES LEFT: {left}", 1330, font_counter,
+                            fill=col)
+            elif hud_kind == "race":
+                center_text("RED  vs  BLUE", 1330, font_counter,
+                            fill=(255, 255, 255, 235))
+            elif hud_kind == "count":
+                center_text(f"BALLS: {len(snap)}", 1330, font_counter,
+                            fill=(255, 255, 255, 235))
+            elif hud_kind == "armour":
+                cur = sim.hp_left.get(cfg.n_rings - rings_left, 0)
+                center_text(f"RINGS LEFT: {rings_left}", 1330, font_counter,
+                            fill=(255, 255, 255, 235))
+            else:
+                center_text(f"RINGS LEFT: {rings_left}", 1330, font_counter,
+                            fill=(255, 255, 255, 235))
+            # The CTA used to draw only AFTER the escape, i.e. past where
+            # almost every viewer had already left. Show it mid-run.
+            if t > sim.escape_t * 0.55:
+                center_text("comment a rule for the next one", 1420,
+                            font_small, fill=(255, 255, 255, 150))
         else:
             fade = min(1.0, (t - sim.escape_t) / 0.6)
             a = int(255 * fade)
-            center_text("ESCAPED", 900, font_big, fill=(255, 255, 255, a))
-            center_text("comment a number = next seed", 1080, font_cta,
-                        fill=(255, 255, 255, a))
-        center_text(f"sim #{cfg.seed}  |  original code-generated", 1800,
-                    font_small, fill=(255, 255, 255, 120), shadow=False)
+            if sim.outcome == "trapped":
+                center_text("TRAPPED", 880, font_big, fill=(255, 120, 120, a))
+                center_text(f"{rings_left} ring{'s' if rings_left != 1 else ''} short",
+                            1030, font_cta, fill=(255, 255, 255, a))
+            elif sim.outcome == "winner":
+                center_text(f"{sim.winner} WINS", 880, font_big,
+                            fill=(255, 255, 255, a))
+            else:
+                center_text("ESCAPED", 880, font_big, fill=(255, 255, 255, a))
+                if cfg.mechanic == "split":
+                    center_text(f"{sim.ball_count} balls", 1030, font_cta,
+                                fill=(255, 255, 255, a))
 
         im.paste(overlay, (0, 0), overlay)
         proc.stdin.write(np.asarray(im, dtype=np.uint8).tobytes())
@@ -577,28 +917,54 @@ def render(cfg: Config, sim: SimResult, wav_path: str, out_path: str):
 # ----------------------------------------------------------------------------
 def write_metadata(cfg: Config, sim: SimResult, mp4_path: str):
     rng = random.Random(cfg.seed ^ 0xCAFE)
-    title = rng.choice(TITLES).format(seed=cfg.seed, n=cfg.n_rings)
+    secs = max(1, int(round(sim.escape_t)))
+    fields = dict(n=cfg.n_rings, secs=secs, deadline=int(cfg.deadline),
+                  budget=cfg.bounce_budget, winner=sim.winner,
+                  balls=sim.ball_count)
+    title = rng.choice(TITLES[cfg.mechanic]).format(**fields)
+    # If the run failed, say so in the title. Promising an escape the video
+    # does not deliver is exactly the misleading-metadata problem the old
+    # "Rated IMPOSSIBLE" titles had, in reverse.
+    if sim.outcome == "trapped":
+        title = f"It didn't make it — {title}"
+
+    spec = MECHANICS[cfg.mechanic]
+    outcome_line = {
+        "trapped": f"Result: TRAPPED, {cfg.n_rings - len(sim.break_times)} "
+                   f"ring(s) short.",
+        "winner": f"Result: {sim.winner} won.",
+    }.get(sim.outcome, f"Result: escaped in {secs}s.")
+
     desc = (
-        f"Ring Escape sim #{cfg.seed} — {cfg.n_rings} rotating rings, one ball, "
-        f"pure physics.\n\n"
-        "Every video on this channel is generated by my own custom physics + "
-        "render engine (Python). Unique seed, unique melody, unique escape — "
-        "no stock footage, no copyrighted music.\n\n"
-        "Comment a number and I'll run it as a future seed.\n\n"
-        "#shorts #satisfying #physics #simulation"
+        f"Rule: {spec['label']}. {cfg.n_rings} rotating rings, "
+        f"{sim.bounces} bounces, one continuous run with no cuts.\n"
+        f"{outcome_line}\n\n"
+        "Every video on this channel is rendered by a physics and animation "
+        "engine I wrote in Python. Each video runs a different rule — the "
+        "clock, closing gaps, armoured rings, a bounce budget, a two-ball "
+        "race — so no two are the same run.\n\n"
+        f"Seed {cfg.seed} | palette {cfg.palette}\n"
+        "Comment a rule you want to see and I'll build it.\n\n"
+        "#shorts #physics #simulation"
     )
+    tags = BASE_TAGS + [
+        f"{cfg.n_rings} rings",
+        spec["label"].lower(),
+    ]
     meta = dict(
         title=title[:100],
         description=desc,
-        tags=TAGS,
+        tags=tags[:12],
         categoryId="24",           # Entertainment
         privacyStatus="public",
         selfDeclaredMadeForKids=False,
         seed=cfg.seed,
+        mechanic=cfg.mechanic,
+        outcome=sim.outcome,
         durationSec=round(sim.duration, 2),
     )
     jpath = os.path.splitext(mp4_path)[0] + ".json"
-    with open(jpath, "w") as fh:
+    with open(jpath, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2)
     return jpath
 
@@ -611,18 +977,20 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--count", type=int, default=1)
     ap.add_argument("--outdir", default=".")
+    ap.add_argument("--mechanic", choices=sorted(MECHANICS), default=None,
+                    help="force one rule; default picks per seed")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
     seed = args.seed if args.seed is not None else random.randrange(1, 10 ** 6)
 
     for k in range(args.count):
-        cfg, sim = find_seed(seed)
+        cfg, sim = find_seed(seed, args.mechanic)
         out = os.path.join(args.outdir, f"escape_{cfg.seed}.mp4")
         wav = os.path.join(args.outdir, f"_tmp_{cfg.seed}.wav")
-        print(f"[{k+1}/{args.count}] seed={cfg.seed} rings={cfg.n_rings} "
-              f"palette={cfg.palette} escape@{sim.escape_t:.1f}s "
-              f"dur={sim.duration:.1f}s")
+        print(f"[{k+1}/{args.count}] seed={cfg.seed} rule={cfg.mechanic} "
+              f"rings={cfg.n_rings} outcome={sim.outcome} "
+              f"resolve@{sim.escape_t:.1f}s dur={sim.duration:.1f}s")
         synth_audio(cfg, sim, wav)
         render(cfg, sim, wav, out)
         os.remove(wav)

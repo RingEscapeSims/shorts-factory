@@ -115,8 +115,10 @@ def get_service():
 # prefix was not added here, and those videos would have gone up as general
 # audience. Failing safe means a new mode I forget about gets REFUSED
 # (annoying, obvious, fixable) instead of mislabelled (a COPPA problem).
-GENERAL_PREFIXES = ("escape_",)          # generate_short.py, the rings engine
-GENERAL_MODES = {"rings", "escape"}
+# escape_*    generate_short.py       (rings Shorts)
+# ringslong_* make_rings_long.py     (rings chaptered long-form)
+GENERAL_PREFIXES = ("escape_", "ringslong_")
+GENERAL_MODES = {"rings", "escape", "longform"}
 
 
 def _is_general_audience(name, meta):
