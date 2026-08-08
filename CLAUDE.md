@@ -94,6 +94,23 @@ Never ship a change without viewing frames at intro / mid / recap / outro.
 - Text is "sticker" style: white fill + dark outline via offset draws; the
   big count number pops with a decaying rotation wobble (pop_number).
 
+## CURRENT STATE: the kids workflows are PAUSED (7 Aug 2026)
+
+`kids-daily.yml` and `kids-long.yml` are **disabled in the Actions UI** at
+the owner's request. Nothing is wrong with them and no code was changed —
+the pause is workflow state, which is invisible in this repo, so check it
+before debugging "why is nothing publishing".
+
+```bash
+gh workflow list --repo RingEscapeSims/shorts-factory          # see state
+gh workflow enable kids-daily.yml --repo RingEscapeSims/...    # resume
+gh workflow enable kids-long.yml  --repo RingEscapeSims/...
+```
+
+The rings pipeline (`daily.yml`) and `retry.yml` are untouched and still
+running. All credentials remain in place, so resuming is just the two
+commands above — no re-authorization needed.
+
 ## Content formats that exist now
 
 | Mode | What it teaches | Variants | Where |
