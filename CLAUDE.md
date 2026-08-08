@@ -111,6 +111,47 @@ The rings pipeline (`daily.yml`) and `retry.yml` are untouched and still
 running. All credentials remain in place, so resuming is just the two
 commands above — no re-authorization needed.
 
+## Rings engine: mechanics (rewritten 8 Aug 2026)
+
+`generate_short.py` is no longer one rule jittered by a seed. `MECHANICS`
+holds seven NAMED rules; the title states the rule, the HUD tracks it, and
+three of them can genuinely fail and publish as failures.
+
+| mechanic | rule | can fail |
+|---|---|---|
+| `classic` | escape every ring | no |
+| `timer` | a clock, and it can run out | **yes** |
+| `shrink` | the outer two rings' gaps close | **yes** |
+| `armour` | rings take several hits, thinning as they wear | no |
+| `budget` | a bounce limit | **yes** |
+| `race` | two balls, first one out wins | no |
+| `split` | each escape spawns another ball | no |
+
+Rules that hold this together:
+
+- **One physics path.** `simulate()` handles every mechanic; balls are a
+  list and rings carry `hp`. A new mechanic must not get its own physics
+  loop, or the mechanics silently diverge.
+- **Failures are the point.** `find_seed(seed, mechanic)` STEERS the
+  outcome — `FAIL_RATE` of runs are required to end trapped, with a
+  fallback so it still ships if that ending never turns up. The old engine
+  discarded every failure, which is why the format contained no question.
+- **A failure must be a near-miss**, not a dud: the acceptance test rejects
+  trapped runs that did not clear most rings first.
+- **Do not apply `shrink` to every ring.** Tried it: 387/400 runs died
+  having cleared a median 50% of rings. Only the outer two shrink.
+- **Never re-add a seed number to a title**, and never let a title promise
+  an escape the run does not deliver — failed runs say so.
+- **Pacing gates and shrink rate are measured, not guessed.** Re-run
+  `scratchpad/gate_sweep.py` / `shrink_sweep.py` before changing them.
+- **HUD lives above y≈1450.** Below that is under the Shorts player chrome
+  (title, @handle, action rail) and is invisible to viewers.
+
+`make_rings_long.py` builds chaptered multi-mechanic compilations with real
+chapter timestamps. Its output prefix `ringslong_` is registered in
+`upload_youtube.GENERAL_PREFIXES` — the made-for-kids check fails closed,
+so any NEW output prefix must be registered there or uploads are refused.
+
 ## Content formats that exist now
 
 | Mode | What it teaches | Variants | Where |
