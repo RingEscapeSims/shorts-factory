@@ -43,8 +43,23 @@ DT = 1.0 / (FPS * SUBSTEPS)
 CENTER = (W // 2, 880)            # ring center, above midline to leave text room
 SR = 44100                        # audio sample rate
 MAX_SIM_SECONDS = 44.0            # discard seeds that run longer
-TARGET_RANGE = (18.0, 40.0)       # acceptable escape time window
-OUTRO_SECONDS = 3.0
+# Shorts are judged in the first 1-2 seconds and rewarded for replays.
+# The old window (18-40s) put the payoff a median 28s in, behind a median
+# 9.5s stretch where no ring broke. Measured over 80 seeds.
+TARGET_RANGE = (10.0, 20.0)       # acceptable escape time window
+# Was 3.0, which left a frozen, silent black card for ~14% of the runtime,
+# right where the auto-replay loops.
+OUTRO_SECONDS = 0.7
+# Pacing gates, enforced in simulate(). Without these a seed can open with
+# 18 seconds of nothing, which is the swipe-away point.
+#
+# These numbers are measured, not guessed. Tighter gates (first break 1.5s,
+# gap 3.5s) had a 0.2% hit rate and needed a 435-seed walk — past
+# find_seed's limit, so most days would have crashed. At 2.5/5.0 the hit
+# rate is 3.8% and the worst observed walk is 125 seeds. Re-run
+# scratchpad/gate_sweep.py before tightening these again.
+MAX_FIRST_BREAK = 2.5             # something must shatter this early
+MAX_BREAK_GAP = 5.0               # never go this long without a break
 
 def _find_font():
     """Locate a bold TTF on Linux, Windows, or macOS."""
@@ -142,7 +157,9 @@ def build_config(seed: int) -> Config:
     palette = rng.choice(PALETTES)
     hue0 = rng.random()
 
-    radii = np.linspace(180, 475, n)
+    # Was (180, 475). The innermost ring covered 4.9% of the frame, so the
+    # opening second was a small dot in a lot of black.
+    radii = np.linspace(240, 520, n)
     rings = []
     for i, r in enumerate(radii):
         if palette == "neon_rainbow":
@@ -268,6 +285,20 @@ def simulate(cfg: Config) -> SimResult:
 
     if escape_t is None or not (TARGET_RANGE[0] <= escape_t <= TARGET_RANGE[1]):
         return res  # ok stays False
+
+    # Pacing gates. Escaping inside the window is not enough — the run also
+    # has to be watchable. Measured over 80 seeds of the old build, the
+    # median seed opened with 4.6s of nothing and contained a 9.5s stretch
+    # with no ring break (worst case 18.4s). Those are the two points where
+    # a Shorts viewer swipes, so reject such seeds outright and let
+    # find_seed() walk to a better one.
+    bt = sorted(res.break_times.values())
+    if not bt or bt[0] > MAX_FIRST_BREAK:
+        return res                      # too slow to start
+    marks = bt + [escape_t]
+    if max(b - a for a, b in zip(marks, marks[1:])) > MAX_BREAK_GAP:
+        return res                      # dead stretch in the middle
+
     res.ok = True
     res.escape_t = escape_t
     res.duration = min(t, escape_t + 1.3) + OUTRO_SECONDS
@@ -277,7 +308,10 @@ def simulate(cfg: Config) -> SimResult:
 def find_seed(start_seed: int):
     """Walk seeds until the sim resolves inside the target window."""
     seed = start_seed
-    for _ in range(400):
+    # Raised from 400. The pacing gates reject ~96% of seeds, and the worst
+    # measured walk was 125; this leaves ~10x headroom so a run never dies
+    # looking for one. Rejected seeds are cheap — no rendering happens.
+    for _ in range(1200):
         cfg = build_config(seed)
         sim = simulate(cfg)
         if sim.ok:
@@ -326,17 +360,30 @@ def synth_audio(cfg: Config, sim: SimResult, path: str):
     buf[:, 1] += bed.astype(np.float32)
 
     last_bounce = -1.0
+    step_i = 0            # climbing index across bounces, NOT the ring index
     for ev in sim.events:
         pan = (ev["pos"][0] / W) * 2 - 1
         if ev["type"] == "bounce":
             if ev["t"] - last_bounce < 0.045:
                 continue
             last_bounce = ev["t"]
-            deg = PENTA[ev["ring"] % len(PENTA)]
-            f = midi_hz(cfg.root_midi + 12 + deg)
+            # This used to be PENTA[ev["ring"] % len(PENTA)]. The ring index
+            # is constant for as long as the ball is caged, so every bounce
+            # inside one ring played the SAME note — 30+ identical beeps in
+            # a long stall. The whole appeal of this genre is the ascending
+            # line, so walk the scale per bounce and lift an octave each
+            # time the scale wraps.
+            deg = PENTA[step_i % len(PENTA)]
+            octave = 12 * min(step_i // len(PENTA), 2)
+            step_i += 1
+            f = midi_hz(cfg.root_midi + 12 + deg + octave)
             amp = 0.14 + 0.16 * min(ev.get("speed", 800) / cfg.speed_cap, 1.0)
             add(ping(f, 0.28, amp), ev["t"], pan)
         elif ev["type"] == "break":
+            # Restart the climb so each ring gets its own rising phrase that
+            # resolves on the break, instead of one runaway climb into a
+            # shrill top octave.
+            step_i = 0
             base = cfg.root_midi + 12 + PENTA[ev["ring"] % len(PENTA)]
             for k, dsemi in enumerate((0, 7, 12)):
                 add(ping(midi_hz(base + dsemi), 0.5, 0.30, bright=0.5),
@@ -393,7 +440,10 @@ def make_background(cfg: Config):
     cx, cy = CENTER[0] / W, CENTER[1] / H
     d = np.sqrt((xx - cx) ** 2 + ((yy - cy) * H / W) ** 2)
     vign = np.clip(1.0 - d * 0.9, 0, 1)
-    base = hsv255(cfg.hue0 + 0.55, 0.6, 0.10)
+    # Was value 0.10, which put mean frame luminance at 17-23/255 — the
+    # darkest thing in a feed of bright video, and a measured 0.3/255 of
+    # change between frame 0 and frame 1, i.e. a still image.
+    base = hsv255(cfg.hue0 + 0.55, 0.6, 0.20)
     bg = np.zeros((H, W, 3), dtype=np.float32)
     for c in range(3):
         bg[:, :, c] = base[c] * (0.35 + 0.65 * vign)
@@ -483,8 +533,9 @@ def render(cfg: Config, sim: SimResult, wav_path: str, out_path: str):
                     cx + ring.radius, cy + ring.radius]
             halo = ring.radius + 7
             bbox_h = [cx - halo, cy - halo, cx + halo, cy + halo]
-            dr.arc(bbox_h, g + wdeg, g + 360, fill=(*ring.color, 70), width=16)
-            dr.arc(bbox, g + wdeg, g + 360, fill=(*ring.color, 255), width=10)
+            # 10px arcs are ~3.4px on a phone. Thicker reads at thumb size.
+            dr.arc(bbox_h, g + wdeg, g + 360, fill=(*ring.color, 70), width=26)
+            dr.arc(bbox, g + wdeg, g + 360, fill=(*ring.color, 255), width=18)
 
         # ball core
         if in_flight:
